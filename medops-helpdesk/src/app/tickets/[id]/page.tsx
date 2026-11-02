@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { Navbar } from "@/components/navbar";
 import { SLACountdown } from "@/components/sla-countdown";
@@ -87,12 +87,9 @@ interface AgentOption {
     email: string;
 }
 
-export default function TicketDetailPage({
-    params,
-}: {
-    params: Promise<{ id: string }>;
-}) {
-    const { id } = use(params);
+export default function TicketDetailPage() {
+    const params = useParams<{ id: string }>();
+    const id = params?.id;
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
 
@@ -111,6 +108,7 @@ export default function TicketDetailPage({
     const [updatingMeta, setUpdatingMeta] = useState(false);
 
     const fetchTicketDetails = useCallback(async () => {
+        if (!id) return;
         setLoading(true);
         setError("");
         try {
@@ -501,7 +499,7 @@ export default function TicketDetailPage({
                                             {posting
                                                 ? "Sending..."
                                                 : isInternal
-                                                    ? "Save Internal Note"
+                                                    ? "Save Note"
                                                     : "Send Reply"}
                                         </Button>
                                     </div>

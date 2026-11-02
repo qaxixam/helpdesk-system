@@ -161,7 +161,7 @@ export async function POST(req: NextRequest) {
         });
 
         // Send email notification to the user
-        await sendTicketEmail({
+        sendTicketEmail({
             to: user.email || "",
             subject: `Incident Logged: ${newTicket.title}`,
             ticketNumber,

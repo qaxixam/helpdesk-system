@@ -38,7 +38,7 @@ interface AttachmentItem {
 }
 
 export function CreateTicketModal({
-    categories,
+    categories = [],
     onCreated,
 }: {
     categories: CategoryOption[];
@@ -47,10 +47,8 @@ export function CreateTicketModal({
     const [open, setOpen] = useState(false);
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
-    const [category, setCategory] = useState("");
-    const [priority, setPriority] = useState<"Low" | "Medium" | "High" | "Urgent">(
-        "Medium"
-    );
+    const [category, setCategory] = useState<string | undefined>(undefined);
+    const [priority, setPriority] = useState<"Low" | "Medium" | "High" | "Urgent">("Medium");
     const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
     const [uploading, setUploading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -69,7 +67,7 @@ export function CreateTicketModal({
         if (!files || files.length === 0) return;
 
         if (attachments.length + files.length > 3) {
-            toast.error("Maximum 3 file attachments allowed per ticket");
+            toast.error("Maximum 3 attachments allowed");
             return;
         }
 
@@ -84,6 +82,7 @@ export function CreateTicketModal({
                     body: formData,
                 });
                 const data = await res.json();
+
                 if (!res.ok) {
                     toast.error(data.error || `Failed to upload ${file.name}`);
                 } else if (data.attachment) {
@@ -91,7 +90,7 @@ export function CreateTicketModal({
                 }
             }
         } catch {
-            toast.error("Error uploading file");
+            toast.error("Network error during file upload");
         } finally {
             setUploading(false);
             e.target.value = "";
@@ -104,8 +103,9 @@ export function CreateTicketModal({
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        setErrors({});
+        if (submitting || uploading) return; // Prevent double click
 
+        setErrors({});
         const parsed = createTicketSchema.safeParse({
             title,
             description,
@@ -132,26 +132,29 @@ export function CreateTicketModal({
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(parsed.data),
             });
+
             const data = await res.json();
 
             if (!res.ok) {
-                toast.error(data.error || "Failed to create ticket");
-                setSubmitting(false);
+                toast.error(data.error || "Failed to submit ticket");
+                setSubmitting(false); // Reset state so user can try again
                 return;
             }
 
             toast.success(`Incident ${data.ticket.ticketNumber} created!`);
             setTitle("");
             setDescription("");
-            setCategory("");
+            setCategory(undefined);
             setPriority("Medium");
             setAttachments([]);
-            setOpen(false);
-            onCreated();
-        } catch {
-            toast.error("Network error while creating ticket");
+            setOpen(false); // Modal close karne se pehle
+            onCreated(); // UI refresh karne ka trigger
+
+        } catch (error) {
+            console.error("Submit error:", error);
+            toast.error("Network timeout. Please try again.");
         } finally {
-            setSubmitting(false);
+            setSubmitting(false); // Hamesha finally block mein reset karein
         }
     }
 
@@ -166,111 +169,78 @@ export function CreateTicketModal({
 
             <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
-                    <DialogTitle className="text-lg font-semibold">
-                        Report Clinical IT Incident
-                    </DialogTitle>
+                    <DialogTitle className="text-lg font-semibold">Report Clinical IT Incident</DialogTitle>
                     <DialogDescription className="text-xs text-slate-500">
-                        SLA timers start immediately upon submission. Urgent incidents carry a
-                        1-hour response and 8-hour resolution target.
+                        SLA timers start immediately. Urgent incidents carry a 1h response target.
                     </DialogDescription>
                 </DialogHeader>
 
                 <form onSubmit={handleSubmit} className="space-y-4 mt-2">
                     <div className="space-y-1.5">
-                        <Label htmlFor="title" className="text-xs font-medium">
-                            Incident Summary / Title
-                        </Label>
+                        <Label className="text-xs font-medium">Incident Summary</Label>
                         <Input
-                            id="title"
-                            placeholder="e.g., Epic EHR e-Prescribe timeout in Triage Room 2"
+                            placeholder="Epic EHR timeout in Room 2"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
+                            disabled={submitting}
                         />
-                        {errors.title && (
-                            <p className="text-xs text-red-600">{errors.title}</p>
-                        )}
+                        {errors.title && <p className="text-[11px] text-red-600">{errors.title}</p>}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1.5">
                             <Label className="text-xs font-medium">System Category</Label>
-                            <Select value={category} onValueChange={handleCategoryChange}>
+                            <Select value={category} onValueChange={(val) => { if (val) handleCategoryChange(val) }} disabled={submitting}>
                                 <SelectTrigger className="w-full">
-                                    <SelectValue placeholder="Select category" />
+                                    <SelectValue placeholder={categories.length === 0 ? "Loading..." : "Select category"} />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-[9999]">
                                     {categories.map((c) => (
-                                        <SelectItem key={c._id} value={c._id}>
-                                            {c.name}
-                                        </SelectItem>
+                                        <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
                                     ))}
                                 </SelectContent>
                             </Select>
-                            {errors.category && (
-                                <p className="text-xs text-red-600">{errors.category}</p>
-                            )}
+                            {errors.category && <p className="text-[11px] text-red-600">{errors.category}</p>}
                         </div>
 
                         <div className="space-y-1.5">
                             <Label className="text-xs font-medium">Impact Priority</Label>
-                            <Select
-                                value={priority}
-                                onValueChange={(val) =>
-                                    setPriority(val as "Low" | "Medium" | "High" | "Urgent")
-                                }
-                            >
-                                <SelectTrigger className="w-full">
-                                    <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="Low">Low (24h Resp / 72h Res)</SelectItem>
-                                    <SelectItem value="Medium">
-                                        Medium (8h Resp / 48h Res)
-                                    </SelectItem>
-                                    <SelectItem value="High">High (4h Resp / 24h Res)</SelectItem>
-                                    <SelectItem value="Urgent">
-                                        Urgent (1h Resp / 8h Res)
-                                    </SelectItem>
+                            <Select value={priority} onValueChange={(val) => setPriority(val as any)} disabled={submitting}>
+                                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                                <SelectContent className="z-[9999]">
+                                    <SelectItem value="Low">Low (24h/72h)</SelectItem>
+                                    <SelectItem value="Medium">Medium (8h/48h)</SelectItem>
+                                    <SelectItem value="High">High (4h/24h)</SelectItem>
+                                    <SelectItem value="Urgent">Urgent (1h/8h)</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
                     </div>
 
                     <div className="space-y-1.5">
-                        <Label htmlFor="description" className="text-xs font-medium">
-                            Detailed Clinical Impact & Error Codes
-                        </Label>
+                        <Label className="text-xs font-medium">Detailed Impact</Label>
                         <Textarea
-                            id="description"
                             rows={4}
-                            placeholder="Describe workstation ID, room number, error message, and clinical impact..."
+                            placeholder="Describe error message and clinical impact..."
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
+                            disabled={submitting}
                         />
-                        {errors.description && (
-                            <p className="text-xs text-red-600">{errors.description}</p>
-                        )}
+                        {errors.description && <p className="text-[11px] text-red-600">{errors.description}</p>}
                     </div>
 
-                    {/* Attachments Section (Max 3) */}
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                            <Label className="text-xs font-medium">
-                                Attachments ({attachments.length}/3)
-                            </Label>
+                            <Label className="text-xs font-medium">Attachments ({attachments.length}/3)</Label>
                             {attachments.length < 3 && (
-                                <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium text-teal-700 hover:text-teal-800">
-                                    {uploading ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                    ) : (
-                                        <Paperclip className="h-3.5 w-3.5" />
-                                    )}
-                                    <span>{uploading ? "Uploading..." : "Attach Screenshot/Log"}</span>
+                                <label className={`cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium ${submitting ? 'text-slate-400' : 'text-teal-700 hover:text-teal-800'}`}>
+                                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+                                    <span>{uploading ? "Uploading..." : "Attach File"}</span>
                                     <input
                                         type="file"
                                         accept="image/*,.pdf,.txt,.log"
                                         onChange={handleFileUpload}
-                                        disabled={uploading}
+                                        disabled={uploading || submitting}
                                         className="hidden"
                                     />
                                 </label>
@@ -280,18 +250,9 @@ export function CreateTicketModal({
                         {attachments.length > 0 && (
                             <div className="space-y-1.5">
                                 {attachments.map((att, idx) => (
-                                    <div
-                                        key={idx}
-                                        className="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-100 border border-slate-200 text-xs"
-                                    >
-                                        <span className="truncate max-w-[320px] font-mono">
-                                            {att.name}
-                                        </span>
-                                        <button
-                                            type="button"
-                                            onClick={() => removeAttachment(idx)}
-                                            className="text-slate-400 hover:text-red-600"
-                                        >
+                                    <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-100 border text-xs">
+                                        <span className="truncate max-w-[320px] font-mono">{att.name}</span>
+                                        <button type="button" onClick={() => removeAttachment(idx)} disabled={submitting} className="text-slate-400 hover:text-red-600">
                                             <X className="h-3.5 w-3.5" />
                                         </button>
                                     </div>
@@ -301,21 +262,11 @@ export function CreateTicketModal({
                     </div>
 
                     <div className="flex justify-end gap-2 pt-2">
-                        <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setOpen(false)}
-                        >
+                        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)} disabled={submitting}>
                             Cancel
                         </Button>
-                        <Button
-                            type="submit"
-                            size="sm"
-                            disabled={submitting || uploading}
-                            className="bg-slate-900 hover:bg-slate-800 text-white"
-                        >
-                            {submitting ? "Submitting..." : "Submit Incident Ticket"}
+                        <Button type="submit" size="sm" disabled={submitting || uploading} className="bg-slate-900 hover:bg-slate-800 text-white">
+                            {submitting ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Submitting...</> : "Submit Incident"}
                         </Button>
                     </div>
                 </form>
