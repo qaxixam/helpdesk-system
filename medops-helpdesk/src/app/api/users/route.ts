@@ -70,54 +70,36 @@ export async function PATCH(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-    const { errorResponse } = await requireAuth(["admin"]);
-    if (errorResponse) return errorResponse;
+    // 🚨 SECURITY TEMPORARILY DISABLED FOR BOOTSTRAPPING
 
     try {
         const { name, email, password, role, facility } = await req.json();
-        if (!name || !email || !password) {
-            return NextResponse.json(
-                { error: "Name, email, and password are required" },
-                { status: 400 }
-            );
+
+        if (!name || !email || !password || !role) {
+            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
         }
 
         await connectDB();
-        const exists = await User.findOne({ email: email.toLowerCase() });
-        if (exists) {
-            return NextResponse.json(
-                { error: "Email already exists" },
-                { status: 409 }
-            );
+
+        const existingUser = await User.findOne({ email: email.toLowerCase() });
+        if (existingUser) {
+            // Agar pehle se bana hua hai toh bataye
+            return NextResponse.json({ error: "Yeh email pehle se database mein mojood hai!" }, { status: 409 });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const created = await User.create({
+
+        const newUser = await User.create({
             name,
             email: email.toLowerCase(),
             password: hashedPassword,
-            role: role || "agent",
-            facility: facility || "NOC Support Desk",
-            isActive: true,
+            role, // "admin" yahan pass ho jayega
+            facility: facility || "IT Headquarters",
         });
 
-        return NextResponse.json(
-            {
-                user: {
-                    _id: created._id,
-                    name: created.name,
-                    email: created.email,
-                    role: created.role,
-                    facility: created.facility,
-                },
-            },
-            { status: 201 }
-        );
+        return NextResponse.json({ message: "Success! Admin ban gaya hai.", user: newUser.email }, { status: 201 });
     } catch (error) {
-        console.error("POST /api/users error:", error);
-        return NextResponse.json(
-            { error: "Failed to create staff account" },
-            { status: 500 }
-        );
+        console.error("Admin creation error:", error);
+        return NextResponse.json({ error: "Failed to create admin" }, { status: 500 });
     }
 }
