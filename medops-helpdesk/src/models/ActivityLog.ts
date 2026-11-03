@@ -27,6 +27,10 @@ const ActivityLogSchema = new Schema<IActivityLog>(
     { timestamps: { createdAt: true, updatedAt: false } }
 );
 
+ActivityLogSchema.index({ createdAt: -1 });
+ActivityLogSchema.index({ actor: 1, createdAt: -1 });
+ActivityLogSchema.index({ ticket: 1, createdAt: -1 });
+
 export const ActivityLog: Model<IActivityLog> =
     mongoose.models.ActivityLog ||
     mongoose.model<IActivityLog>("ActivityLog", ActivityLogSchema);

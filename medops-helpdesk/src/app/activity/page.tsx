@@ -57,6 +57,7 @@ export default function ActivityPage() {
 
     const fetchActivities = useCallback(async () => {
         try {
+            setLoading(true);
             setError("");
             const res = await fetch("/api/activity");
             const data = await res.json();
@@ -66,7 +67,7 @@ export default function ActivityPage() {
                 setActivities(data.activities || []);
             }
         } catch {
-            setError("Network error while loading activities");
+            setError("Network error while loading activities. Click Refresh to retry.");
         } finally {
             setLoading(false);
         }
@@ -77,15 +78,28 @@ export default function ActivityPage() {
         const controller = new AbortController();
 
         fetch("/api/activity", { signal: controller.signal })
-            .then((res) => res.json())
-            .then((data) => {
-                if (data.activities) {
-                    setActivities(data.activities);
+            .then(async (res) => {
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || "Failed to load activity stream");
                 }
+                return data;
             })
-            .catch(() => {})
+            .then((data) => {
+                setActivities(data.activities || []);
+                setError("");
+            })
+            .catch((err: unknown) => {
+                if (err instanceof DOMException && err.name === "AbortError") {
+                    return;
+                }
+                const msg = err instanceof Error ? err.message : "Network error while loading activities";
+                setError(msg);
+            })
             .finally(() => {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             });
 
         return () => controller.abort();

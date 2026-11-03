@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
         void User;
 
         // Sync SLA breaches & 3-day auto-close in real time
-        await syncSLAsAndAutoClose();
+        void syncSLAsAndAutoClose();
 
         const { searchParams } = new URL(req.url);
         const page = Math.max(1, Number(searchParams.get("page")) || 1);

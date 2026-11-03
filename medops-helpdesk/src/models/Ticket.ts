@@ -86,5 +86,9 @@ const TicketSchema = new Schema<ITicket>(
     { timestamps: true }
 );
 
+TicketSchema.index({ createdBy: 1, createdAt: -1 });
+TicketSchema.index({ assignedAgent: 1, createdAt: -1 });
+TicketSchema.index({ status: 1, createdAt: -1 });
+
 export const Ticket: Model<ITicket> =
     mongoose.models.Ticket || mongoose.model<ITicket>("Ticket", TicketSchema);

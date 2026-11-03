@@ -11,7 +11,7 @@ export async function syncSLAsAndAutoClose() {
       {
         status: { $nin: ["Resolved", "Closed"] },
         slaBreached: false,
-        slaDeadline: { $lt: now },
+        resolutionDueDate: { $lt: now },
       },
       {
         $set: { slaBreached: true },

@@ -85,6 +85,7 @@ export default function DashboardPage() {
 
     const fetchTickets = useCallback(async () => {
         try {
+            setLoading(true);
             setError("");
             const params = new URLSearchParams({
                 page: String(page),
@@ -106,7 +107,7 @@ export default function DashboardPage() {
                 setPagination(data.pagination || { page: 1, limit: 8, totalCount: 0, totalPages: 1 });
             }
         } catch {
-            setError("Network error while fetching clinical tickets");
+            setError("Network error while fetching clinical tickets. Click Refresh to retry.");
         } finally {
             setLoading(false);
         }
@@ -117,9 +118,9 @@ export default function DashboardPage() {
         const controller = new AbortController();
 
         fetch("/api/categories", { signal: controller.signal })
-            .then((res) => res.json())
+            .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
-                if (data.categories) setCategories(data.categories);
+                if (data?.categories) setCategories(data.categories);
             })
             .catch(() => {});
 
@@ -134,18 +135,29 @@ export default function DashboardPage() {
         if (breachedOnly) params.set("breached", "true");
 
         fetch(`/api/tickets?${params.toString()}`, { signal: controller.signal })
-            .then((res) => res.json())
-            .then((data) => {
-                if (data.tickets) {
-                    setTickets(data.tickets);
-                    setPagination(data.pagination || { page: 1, limit: 8, totalCount: 0, totalPages: 1 });
+            .then(async (res) => {
+                const data = await res.json();
+                if (!res.ok) {
+                    throw new Error(data.error || "Failed to load tickets");
                 }
+                return data;
             })
-            .catch(() => {
-                setError("Network error while fetching clinical tickets");
+            .then((data) => {
+                setTickets(data.tickets || []);
+                setPagination(data.pagination || { page: 1, limit: 8, totalCount: 0, totalPages: 1 });
+                setError("");
+            })
+            .catch((err: unknown) => {
+                if (err instanceof DOMException && err.name === "AbortError") {
+                    return; // React cleanup / unmount abort - ignore
+                }
+                const msg = err instanceof Error ? err.message : "Network error while fetching tickets";
+                setError(msg);
             })
             .finally(() => {
-                setLoading(false);
+                if (!controller.signal.aborted) {
+                    setLoading(false);
+                }
             });
 
         return () => controller.abort();
