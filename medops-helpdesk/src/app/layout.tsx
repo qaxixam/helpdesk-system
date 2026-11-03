@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
-import { Providers } from "@/components/providers";
+import { Toaster } from "sonner";
+import { Providers } from "@/components/providers"; // 👈 Yeh nayi line add karein
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
-const mono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono" });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "MedOps IT | Clinical Incident & SLA Helpdesk",
-  description:
-    "Enterprise healthcare IT ticketing, SLA tracking, and incident response system.",
+  title: "MedOps IT Helpdesk",
+  description: "B2B Healthcare IT Support System",
 };
 
 export default function RootLayout({
@@ -18,9 +17,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${inter.variable} ${mono.variable}`}>
-      <body className="min-h-screen bg-slate-50 font-sans text-slate-900 antialiased">
-        <Providers>{children}</Providers>
+    // suppressHydrationWarning humne pehle hi add kiya tha
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning className={`${inter.variable} min-h-screen bg-[#F4F6FB] font-sans text-slate-900 antialiased overflow-x-hidden max-w-full w-full`}>
+        {/* 🚀 FIX: Ab puri app SessionProvider ke andar safe hai */}
+        <Providers>
+          {children}
+          <Toaster position="top-center" richColors />
+        </Providers>
       </body>
     </html>
   );

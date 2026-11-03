@@ -1,55 +1,41 @@
 import { Ticket } from "@/models/Ticket";
-import { ActivityLog } from "@/models/ActivityLog";
+import { connectDB } from "@/lib/db";
 
 export async function syncSLAsAndAutoClose() {
-  const now = new Date();
-  const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+  try {
+    await connectDB();
+    const now = new Date();
 
-  // 1. Mark SLA Breached:
-  // (a) First response abhi tak nahi aaya aur responseDueDate guzar gayi
-  // (b) Ticket abhi Resolved/Closed nahi hui aur resolutionDueDate guzar gayi
-  const breachResult = await Ticket.updateMany(
-    {
-      slaBreached: false,
-      $or: [
-        {
-          firstRespondedAt: null,
-          responseDueDate: { $lt: now },
-        },
-        {
-          status: { $nin: ["Resolved", "Closed"] },
-          resolutionDueDate: { $lt: now },
-        },
-      ],
-    },
-    { $set: { slaBreached: true } }
-  );
+    // 1. Bulk mark breached tickets instantly (bina loop aur email hang ke)
+    const breachResult = await Ticket.updateMany(
+      {
+        status: { $nin: ["Resolved", "Closed"] },
+        slaBreached: false,
+        slaDeadline: { $lt: now },
+      },
+      {
+        $set: { slaBreached: true },
+      }
+    );
 
-  // 2. Auto-Close tickets that stayed in "Resolved" for > 3 days without user reply
-  const staleResolvedTickets = await Ticket.find({
-    status: "Resolved",
-    resolvedAt: { $lte: threeDaysAgo },
-  });
+    // 2. Auto-close tickets jo 48 hours se Resolved par hain
+    const twoDaysAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
+    const closeResult = await Ticket.updateMany(
+      {
+        status: "Resolved",
+        updatedAt: { $lt: twoDaysAgo },
+      },
+      {
+        $set: { status: "Closed" },
+      }
+    );
 
-  let autoClosedCount = 0;
-
-  for (const t of staleResolvedTickets) {
-    t.status = "Closed";
-    t.closedAt = now;
-    await t.save();
-    autoClosedCount++;
-
-    await ActivityLog.create({
-      ticket: t._id,
-      actor: t.assignedAgent || t.createdBy,
-      action: "AUTO_CLOSED",
-      details:
-        "System auto-closed ticket after 72 hours in Resolved state without requester reply",
-    });
+    return {
+      newlyBreached: breachResult.modifiedCount || 0,
+      autoClosedCount: closeResult.modifiedCount || 0,
+    };
+  } catch (error) {
+    console.error("SLA Sync Error:", error);
+    return { newlyBreached: 0, autoClosedCount: 0 };
   }
-
-  return {
-    newlyBreached: breachResult.modifiedCount,
-    autoClosedCount,
-  };
 }

@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Activity, UserPlus } from "lucide-react";
+import { UserPlus } from "lucide-react";
 
 export default function RegisterPage() {
     const router = useRouter();
@@ -53,72 +53,88 @@ export default function RegisterPage() {
     }
 
     return (
-        <div className="min-h-screen flex w-full">
-            <div className="hidden lg:flex w-1/2 bg-slate-950 items-center justify-center flex-col">
-                <div className="h-16 w-16 rounded-xl bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 mb-6 shadow-2xl">
-                    <Activity className="h-8 w-8" />
+        <div className="min-h-screen flex w-full bg-[#F4F6FB] font-sans">
+            {/* Left Minimal Brand Panel */}
+            <div className="hidden lg:flex w-1/2 bg-[#141738] items-center justify-center flex-col p-12 relative overflow-hidden">
+                <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-[#6052E9]/20 blur-3xl pointer-events-none" />
+                <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-[#00D2B4]/15 blur-3xl pointer-events-none" />
+
+                <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
+                    <div className="flex items-center gap-2 mb-6">
+                        <span className="w-4 h-4 rounded-full bg-[#FFB020] inline-block shadow-sm" />
+                        <span className="w-4 h-4 rounded-full bg-[#00D2B4] inline-block shadow-sm" />
+                        <span className="w-4 h-4 rounded-full bg-[#FF5630] inline-block shadow-sm" />
+                    </div>
+                    <h1 className="text-3xl font-extrabold tracking-tight text-white mb-3">
+                        Join MedOps
+                    </h1>
+                    <p className="text-sm text-slate-300 font-normal leading-relaxed">
+                        Register your clinical facility and start managing your healthcare IT incidents seamlessly.
+                    </p>
                 </div>
-                <h1 className="text-2xl font-semibold tracking-tight text-white mb-2">MedOps IT-SOC</h1>
-                <p className="text-sm text-slate-500 font-mono">Enterprise Service Level Management</p>
             </div>
 
-            <div className="w-full lg:w-1/2 flex items-center justify-center bg-white px-6">
-                <div className="w-full max-w-sm space-y-6">
+            {/* Right Register Form */}
+            <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-12">
+                <div className="w-full max-w-sm space-y-6 bg-white p-8 sm:p-10 rounded-2xl shadow-baligo border border-slate-100">
                     <div className="lg:hidden flex flex-col items-center mb-6">
-                        <div className="h-10 w-10 rounded-lg bg-slate-950 flex items-center justify-center text-teal-400 mb-3">
-                            <Activity className="h-5 w-5" />
+                        <div className="flex items-center gap-2 mb-3">
+                            <span className="w-3 h-3 rounded-full bg-[#FFB020]" />
+                            <span className="w-3 h-3 rounded-full bg-[#00D2B4]" />
+                            <span className="w-3 h-3 rounded-full bg-[#FF5630]" />
                         </div>
+                        <h1 className="text-xl font-bold text-slate-900">MedOps Helpdesk</h1>
                     </div>
 
                     <div>
-                        <h2 className="text-xl font-semibold text-slate-900">Create an account</h2>
-                        <p className="text-sm text-slate-500 mt-1">Register to submit support incidents.</p>
+                        <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Create an account</h2>
+                        <p className="text-xs text-slate-400 mt-1">Register to submit support incidents.</p>
                     </div>
 
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-slate-700">Full Name</Label>
+                            <Label className="text-xs font-semibold text-slate-700">Full Name</Label>
                             <Input
-                                placeholder="John Doe" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                                className="h-10 text-sm"
+                                placeholder="Dr. Sarah Jenkins" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
+                                className="h-10 text-xs rounded-xl"
                             />
-                            {errors.name && <p className="text-[11px] text-red-600">{errors.name}</p>}
+                            {errors.name && <p className="text-[11px] text-rose-600 font-medium">{errors.name}</p>}
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-slate-700">Facility / Department</Label>
+                            <Label className="text-xs font-semibold text-slate-700">Facility / Clinic</Label>
                             <Input
-                                placeholder="Radiology Wing" value={form.facility} onChange={(e) => setForm({ ...form, facility: e.target.value })}
-                                className="h-10 text-sm"
+                                placeholder="Radiology Wing / General Hospital" value={form.facility} onChange={(e) => setForm({ ...form, facility: e.target.value })}
+                                className="h-10 text-xs rounded-xl"
                             />
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-slate-700">Work Email</Label>
+                            <Label className="text-xs font-semibold text-slate-700">Work Email</Label>
                             <Input
-                                type="email" placeholder="name@company.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                                className="h-10 text-sm"
+                                type="email" placeholder="sarah@hospital.org" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                                className="h-10 text-xs rounded-xl"
                             />
-                            {errors.email && <p className="text-[11px] text-red-600">{errors.email}</p>}
+                            {errors.email && <p className="text-[11px] text-rose-600 font-medium">{errors.email}</p>}
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label className="text-xs font-medium text-slate-700">Password</Label>
+                            <Label className="text-xs font-semibold text-slate-700">Password</Label>
                             <Input
                                 type="password" placeholder="••••••••" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                                className="h-10 text-sm"
+                                className="h-10 text-xs rounded-xl"
                             />
-                            {errors.password && <p className="text-[11px] text-red-600">{errors.password}</p>}
+                            {errors.password && <p className="text-[11px] text-rose-600 font-medium">{errors.password}</p>}
                         </div>
 
-                        <Button type="submit" disabled={loading} className="w-full h-10 bg-slate-900 hover:bg-slate-800 text-white mt-2">
+                        <Button type="submit" disabled={loading} className="w-full h-10 bg-[#6052E9] hover:bg-[#4F46E5] text-white rounded-xl font-semibold shadow-sm transition-all mt-2">
                             <UserPlus className="h-4 w-4 mr-2" />
                             {loading ? "Creating account..." : "Register"}
                         </Button>
                     </form>
 
-                    <p className="text-center text-sm text-slate-500 pt-2">
-                        Already have an account? <Link href="/login" className="text-slate-900 font-medium hover:underline">Sign in</Link>
+                    <p className="text-center text-xs text-slate-400 pt-2 border-t border-slate-100">
+                        Already have an account? <Link href="/login" className="text-[#6052E9] font-bold hover:underline">Sign in</Link>
                     </p>
                 </div>
             </div>

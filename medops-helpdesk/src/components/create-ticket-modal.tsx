@@ -40,9 +40,13 @@ interface AttachmentItem {
 export function CreateTicketModal({
     categories = [],
     onCreated,
+    triggerText = "Create Ticket",
+    triggerClassName,
 }: {
     categories: CategoryOption[];
     onCreated: () => void;
+    triggerText?: string;
+    triggerClassName?: string;
 }) {
     const [open, setOpen] = useState(false);
     const [title, setTitle] = useState("");
@@ -72,29 +76,31 @@ export function CreateTicketModal({
         }
 
         setUploading(true);
-        try {
-            for (const file of Array.from(files)) {
-                const formData = new FormData();
-                formData.append("file", file);
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+            const formData = new FormData();
+            formData.append("file", file);
 
+            try {
                 const res = await fetch("/api/upload", {
                     method: "POST",
                     body: formData,
                 });
                 const data = await res.json();
-
                 if (!res.ok) {
                     toast.error(data.error || `Failed to upload ${file.name}`);
-                } else if (data.attachment) {
-                    setAttachments((prev) => [...prev, data.attachment]);
+                } else {
+                    setAttachments((prev) => [
+                        ...prev,
+                        { name: data.name, url: data.url, publicId: data.publicId },
+                    ]);
                 }
+            } catch {
+                toast.error(`Error uploading ${file.name}`);
             }
-        } catch {
-            toast.error("Network error during file upload");
-        } finally {
-            setUploading(false);
-            e.target.value = "";
         }
+        setUploading(false);
+        e.target.value = "";
     }
 
     function removeAttachment(index: number) {
@@ -103,9 +109,8 @@ export function CreateTicketModal({
 
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
-        if (submitting || uploading) return; // Prevent double click
-
         setErrors({});
+
         const parsed = createTicketSchema.safeParse({
             title,
             description,
@@ -137,7 +142,7 @@ export function CreateTicketModal({
 
             if (!res.ok) {
                 toast.error(data.error || "Failed to submit ticket");
-                setSubmitting(false); // Reset state so user can try again
+                setSubmitting(false);
                 return;
             }
 
@@ -147,29 +152,32 @@ export function CreateTicketModal({
             setCategory(undefined);
             setPriority("Medium");
             setAttachments([]);
-            setOpen(false); // Modal close karne se pehle
-            onCreated(); // UI refresh karne ka trigger
+            setOpen(false);
+            onCreated();
 
         } catch (error) {
             console.error("Submit error:", error);
             toast.error("Network timeout. Please try again.");
         } finally {
-            setSubmitting(false); // Hamesha finally block mein reset karein
+            setSubmitting(false);
         }
     }
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild>
-                <Button className="bg-slate-900 hover:bg-slate-800 text-white text-xs h-9">
-                    <Plus className="h-4 w-4 mr-1.5" />
-                    Report Clinical Incident
-                </Button>
+            <DialogTrigger
+                className={
+                    triggerClassName ||
+                    "h-10 px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
+                }
+            >
+                <Plus className="h-4 w-4" />
+                {triggerText}
             </DialogTrigger>
 
             <DialogContent className="sm:max-w-lg">
                 <DialogHeader>
-                    <DialogTitle className="text-lg font-semibold">Report Clinical IT Incident</DialogTitle>
+                    <DialogTitle className="text-lg font-bold text-slate-900">Report Clinical IT Incident</DialogTitle>
                     <DialogDescription className="text-xs text-slate-500">
                         SLA timers start immediately. Urgent incidents carry a 1h response target.
                     </DialogDescription>
@@ -177,21 +185,22 @@ export function CreateTicketModal({
 
                 <form onSubmit={handleSubmit} className="space-y-4 mt-2">
                     <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">Incident Summary</Label>
+                        <Label className="text-xs font-semibold text-slate-700">Incident Summary</Label>
                         <Input
                             placeholder="Epic EHR timeout in Room 2"
                             value={title}
                             onChange={(e) => setTitle(e.target.value)}
                             disabled={submitting}
+                            className="rounded-xl"
                         />
-                        {errors.title && <p className="text-[11px] text-red-600">{errors.title}</p>}
+                        {errors.title && <p className="text-[11px] text-rose-600 font-medium">{errors.title}</p>}
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1.5">
-                            <Label className="text-xs font-medium">System Category</Label>
-                            <Select value={category} onValueChange={(val) => { if (val) handleCategoryChange(val) }} disabled={submitting}>
-                                <SelectTrigger className="w-full">
+                            <Label className="text-xs font-semibold text-slate-700">System Category</Label>
+                            <Select value={category} onValueChange={(val) => { if (val) handleCategoryChange(val); }} disabled={submitting}>
+                                <SelectTrigger className="w-full rounded-xl">
                                     <SelectValue placeholder={categories.length === 0 ? "Loading..." : "Select category"} />
                                 </SelectTrigger>
                                 <SelectContent className="z-[9999]">
@@ -200,13 +209,13 @@ export function CreateTicketModal({
                                     ))}
                                 </SelectContent>
                             </Select>
-                            {errors.category && <p className="text-[11px] text-red-600">{errors.category}</p>}
+                            {errors.category && <p className="text-[11px] text-rose-600 font-medium">{errors.category}</p>}
                         </div>
 
                         <div className="space-y-1.5">
-                            <Label className="text-xs font-medium">Impact Priority</Label>
-                            <Select value={priority} onValueChange={(val) => setPriority(val as any)} disabled={submitting}>
-                                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                            <Label className="text-xs font-semibold text-slate-700">Impact Priority</Label>
+                            <Select value={priority} onValueChange={(val) => { if (val) setPriority(val as "Low" | "Medium" | "High" | "Urgent"); }} disabled={submitting}>
+                                <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
                                 <SelectContent className="z-[9999]">
                                     <SelectItem value="Low">Low (24h/72h)</SelectItem>
                                     <SelectItem value="Medium">Medium (8h/48h)</SelectItem>
@@ -218,22 +227,23 @@ export function CreateTicketModal({
                     </div>
 
                     <div className="space-y-1.5">
-                        <Label className="text-xs font-medium">Detailed Impact</Label>
+                        <Label className="text-xs font-semibold text-slate-700">Detailed Impact</Label>
                         <Textarea
                             rows={4}
                             placeholder="Describe error message and clinical impact..."
                             value={description}
                             onChange={(e) => setDescription(e.target.value)}
                             disabled={submitting}
+                            className="rounded-xl"
                         />
-                        {errors.description && <p className="text-[11px] text-red-600">{errors.description}</p>}
+                        {errors.description && <p className="text-[11px] text-rose-600 font-medium">{errors.description}</p>}
                     </div>
 
                     <div className="space-y-2">
                         <div className="flex items-center justify-between">
-                            <Label className="text-xs font-medium">Attachments ({attachments.length}/3)</Label>
+                            <Label className="text-xs font-semibold text-slate-700">Attachments ({attachments.length}/3)</Label>
                             {attachments.length < 3 && (
-                                <label className={`cursor-pointer inline-flex items-center gap-1.5 text-xs font-medium ${submitting ? 'text-slate-400' : 'text-teal-700 hover:text-teal-800'}`}>
+                                <label className={`cursor-pointer inline-flex items-center gap-1.5 text-xs font-semibold ${submitting ? 'text-slate-400' : 'text-[#6052E9] hover:underline'}`}>
                                     {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
                                     <span>{uploading ? "Uploading..." : "Attach File"}</span>
                                     <input
@@ -250,9 +260,9 @@ export function CreateTicketModal({
                         {attachments.length > 0 && (
                             <div className="space-y-1.5">
                                 {attachments.map((att, idx) => (
-                                    <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-100 border text-xs">
+                                    <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-100 border text-xs">
                                         <span className="truncate max-w-[320px] font-mono">{att.name}</span>
-                                        <button type="button" onClick={() => removeAttachment(idx)} disabled={submitting} className="text-slate-400 hover:text-red-600">
+                                        <button type="button" onClick={() => removeAttachment(idx)} disabled={submitting} className="text-slate-400 hover:text-rose-600">
                                             <X className="h-3.5 w-3.5" />
                                         </button>
                                     </div>
@@ -262,10 +272,10 @@ export function CreateTicketModal({
                     </div>
 
                     <div className="flex justify-end gap-2 pt-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)} disabled={submitting}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)} disabled={submitting} className="rounded-xl">
                             Cancel
                         </Button>
-                        <Button type="submit" size="sm" disabled={submitting || uploading} className="bg-slate-900 hover:bg-slate-800 text-white">
+                        <Button type="submit" size="sm" disabled={submitting || uploading} className="bg-[#00D084] hover:bg-[#00BC76] text-white rounded-xl font-bold">
                             {submitting ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Submitting...</> : "Submit Incident"}
                         </Button>
                     </div>

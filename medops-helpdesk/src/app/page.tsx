@@ -1,18 +1,19 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { connection } from "next/server";
+
+// 🚀 FIX: Next.js 16 ke naye 'cacheComponents' ke mutabiq dynamic route ko handle karna
+export const instant = false;
 
 export default async function HomePage() {
-  // Naya Next.js 16 tareeqa: Yeh line page ko automatically server-side (dynamic) bana degi
-  await connection();
-
+  // Auth check (yeh automatically headers/cookies read karta hai)
   const session = await auth();
 
+  // Agar logged in nahi hai toh Login page par bhejein
   if (!session?.user) {
     redirect("/login");
   }
 
-  // Role-based smart redirection
+  // Agar logged in hai toh Role ke hisab se sahi dashboard par bhejein
   if (session.user.role === "admin") {
     redirect("/admin");
   } else {
