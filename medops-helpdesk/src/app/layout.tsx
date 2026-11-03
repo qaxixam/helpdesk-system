@@ -1,14 +1,19 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
-import { Providers } from "@/components/providers"; // 👈 Yeh nayi line add karein
+import { Providers } from "@/components/providers";
 
-const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
+const plusJakartaSans = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-sans",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "MedOps IT Helpdesk",
-  description: "B2B Healthcare IT Support System",
+  description: "B2B Healthcare IT Incident & Operations Support System",
 };
 
 export default function RootLayout({
@@ -17,10 +22,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    // suppressHydrationWarning humne pehle hi add kiya tha
     <html lang="en" suppressHydrationWarning>
-      <body suppressHydrationWarning className={`${inter.variable} min-h-screen bg-[#F4F6FB] font-sans text-slate-900 antialiased overflow-x-hidden max-w-full w-full`}>
-        {/* 🚀 FIX: Ab puri app SessionProvider ke andar safe hai */}
+      <body
+        suppressHydrationWarning
+        className={`${plusJakartaSans.variable} min-h-screen bg-[#F4F6FB] font-sans text-slate-900 antialiased overflow-x-hidden max-w-full w-full selection:bg-purple-500 selection:text-white`}
+      >
         <Providers>
           {children}
           <Toaster position="top-center" richColors />

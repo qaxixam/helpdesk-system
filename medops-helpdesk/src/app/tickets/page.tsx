@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { CreateTicketModal } from "@/components/create-ticket-modal";
+import { TableSkeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -210,9 +211,9 @@ export default function MyTicketsPage() {
                             </span>
                         </div>
 
-                        {/* Search & Filters */}
-                        <div className="flex flex-wrap items-center gap-2.5">
-                            <div className="relative min-w-[200px]">
+                        {/* Search & Filters (Responsive on Mobile) */}
+                        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full md:w-auto">
+                            <div className="relative w-full sm:w-auto flex-1 sm:flex-initial sm:min-w-[180px]">
                                 <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                                 <Input
                                     placeholder="Search TKT or title..."
@@ -221,74 +222,76 @@ export default function MyTicketsPage() {
                                         setSearch(e.target.value);
                                         setPage(1);
                                     }}
-                                    className="pl-8 h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white"
+                                    className="pl-8 h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white w-full"
                                 />
                             </div>
 
-                            <Select
-                                value={statusFilter}
-                                onValueChange={(v) => {
-                                    if (v) {
-                                        setStatusFilter(v);
-                                        setPage(1);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[125px]">
-                                    <SelectValue placeholder="Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">All Statuses</SelectItem>
-                                    <SelectItem value="Open">Open</SelectItem>
-                                    <SelectItem value="In Progress">In Progress</SelectItem>
-                                    <SelectItem value="Waiting on User">Waiting on User</SelectItem>
-                                    <SelectItem value="Resolved">Resolved</SelectItem>
-                                    <SelectItem value="Closed">Closed</SelectItem>
-                                </SelectContent>
-                            </Select>
+                            <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+                                <Select
+                                    value={statusFilter}
+                                    onValueChange={(v) => {
+                                        if (v) {
+                                            setStatusFilter(v);
+                                            setPage(1);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 flex-1 sm:w-[120px]">
+                                        <SelectValue placeholder="Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">All Statuses</SelectItem>
+                                        <SelectItem value="Open">Open</SelectItem>
+                                        <SelectItem value="In Progress">In Progress</SelectItem>
+                                        <SelectItem value="Waiting on User">Waiting on User</SelectItem>
+                                        <SelectItem value="Resolved">Resolved</SelectItem>
+                                        <SelectItem value="Closed">Closed</SelectItem>
+                                    </SelectContent>
+                                </Select>
 
-                            <Select
-                                value={priorityFilter}
-                                onValueChange={(v) => {
-                                    if (v) {
-                                        setPriorityFilter(v);
-                                        setPage(1);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[125px]">
-                                    <SelectValue placeholder="Priority" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">All Priorities</SelectItem>
-                                    <SelectItem value="Urgent">Urgent (1h SLA)</SelectItem>
-                                    <SelectItem value="High">High (4h SLA)</SelectItem>
-                                    <SelectItem value="Medium">Medium (8h SLA)</SelectItem>
-                                    <SelectItem value="Low">Low (24h SLA)</SelectItem>
-                                </SelectContent>
-                            </Select>
+                                <Select
+                                    value={priorityFilter}
+                                    onValueChange={(v) => {
+                                        if (v) {
+                                            setPriorityFilter(v);
+                                            setPage(1);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 flex-1 sm:w-[115px]">
+                                        <SelectValue placeholder="Priority" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">All Priorities</SelectItem>
+                                        <SelectItem value="Urgent">Urgent (1h SLA)</SelectItem>
+                                        <SelectItem value="High">High (4h SLA)</SelectItem>
+                                        <SelectItem value="Medium">Medium (8h SLA)</SelectItem>
+                                        <SelectItem value="Low">Low (24h SLA)</SelectItem>
+                                    </SelectContent>
+                                </Select>
 
-                            <Select
-                                value={categoryFilter}
-                                onValueChange={(v) => {
-                                    if (v) {
-                                        setCategoryFilter(v);
-                                        setPage(1);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[135px]">
-                                    <SelectValue placeholder="Category" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">All Categories</SelectItem>
-                                    {categories.map((c) => (
-                                        <SelectItem key={c._id} value={c._id}>
-                                            {c.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                <Select
+                                    value={categoryFilter}
+                                    onValueChange={(v) => {
+                                        if (v) {
+                                            setCategoryFilter(v);
+                                            setPage(1);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 flex-1 sm:w-[125px]">
+                                        <SelectValue placeholder="Category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">All Categories</SelectItem>
+                                        {categories.map((c) => (
+                                            <SelectItem key={c._id} value={c._id}>
+                                                {c.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                     </div>
 
@@ -302,9 +305,7 @@ export default function MyTicketsPage() {
                     {/* Table View */}
                     <div className="overflow-hidden rounded-xl border border-slate-100 w-full min-w-0 max-w-full">
                         {loading ? (
-                            <div className="p-12 text-center text-xs text-slate-400">
-                                Loading your tickets...
-                            </div>
+                            <TableSkeleton rows={6} cols={5} />
                         ) : tickets.length === 0 ? (
                             <div className="p-12 text-center space-y-3">
                                 <Inbox className="h-9 w-9 text-slate-300 mx-auto" />
@@ -327,14 +328,14 @@ export default function MyTicketsPage() {
                             </div>
                         ) : (
                             <div className="overflow-x-auto w-full max-w-full">
-                                <table className="w-full text-left border-collapse min-w-[700px]">
+                                <table className="w-full text-left border-collapse">
                                     <thead>
                                         <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                            <th className="py-3 px-4">Ticket</th>
-                                            <th className="py-3 px-4">Incident Name</th>
-                                            <th className="py-3 px-4">Priority</th>
-                                            <th className="py-3 px-4">Status</th>
-                                            <th className="py-3 px-4 text-right">Action</th>
+                                            <th className="py-3 px-3 sm:px-4">Ticket</th>
+                                            <th className="py-3 px-3 sm:px-4">Incident Name</th>
+                                            <th className="py-3 px-4 hidden sm:table-cell">Priority</th>
+                                            <th className="py-3 px-4 hidden sm:table-cell">Status</th>
+                                            <th className="py-3 px-3 sm:px-4 text-right">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 text-xs">
@@ -343,7 +344,7 @@ export default function MyTicketsPage() {
                                                 key={t._id}
                                                 className="hover:bg-slate-50/80 transition-colors group"
                                             >
-                                                <td className="py-3.5 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                                                <td className="py-3 sm:py-3.5 px-3 sm:px-4 font-mono font-bold text-slate-900 whitespace-nowrap text-xs">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
                                                         className="text-[#6052E9] hover:underline"
@@ -352,19 +353,38 @@ export default function MyTicketsPage() {
                                                     </Link>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 max-w-xs">
+                                                <td className="py-3 sm:py-3.5 px-3 sm:px-4 max-w-[170px] sm:max-w-xs">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
-                                                        className="font-semibold text-slate-800 group-hover:text-[#6052E9] line-clamp-1"
+                                                        className="font-semibold text-slate-800 group-hover:text-[#6052E9] line-clamp-1 text-xs"
                                                     >
                                                         {t.title}
                                                     </Link>
-                                                    <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                                                    {/* Mobile inline badges */}
+                                                    <div className="flex sm:hidden items-center gap-1.5 mt-1 flex-wrap">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[9px] rounded-md px-1.5 py-0.2 ${priorityBadge(
+                                                                t.priority
+                                                            )}`}
+                                                        >
+                                                            {t.priority}
+                                                        </Badge>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[9px] rounded-md px-1.5 py-0.2 ${statusBadge(
+                                                                t.status
+                                                            )}`}
+                                                        >
+                                                            {t.status}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                                                         Logged {new Date(t.createdAt).toLocaleDateString()}
                                                     </div>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <td className="py-3.5 px-4 whitespace-nowrap hidden sm:table-cell">
                                                     <Badge
                                                         variant="outline"
                                                         className={`text-[11px] rounded-lg px-2 py-0.5 ${priorityBadge(
@@ -375,7 +395,7 @@ export default function MyTicketsPage() {
                                                     </Badge>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <td className="py-3.5 px-4 whitespace-nowrap hidden sm:table-cell">
                                                     <Badge
                                                         variant="outline"
                                                         className={`text-[11px] rounded-lg px-2 py-0.5 ${statusBadge(
@@ -386,10 +406,10 @@ export default function MyTicketsPage() {
                                                     </Badge>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                                <td className="py-3 sm:py-3.5 px-3 sm:px-4 text-right whitespace-nowrap">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
-                                                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-[#6052E9] font-bold text-xs transition"
+                                                        className="inline-flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 text-[#6052E9] font-bold text-xs transition"
                                                     >
                                                         <span>View</span>
                                                         <ArrowUpRight className="h-3.5 w-3.5" />

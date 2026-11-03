@@ -6,6 +6,7 @@ import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { SLACountdown } from "@/components/sla-countdown";
+import { TicketDetailSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
@@ -252,18 +253,16 @@ export default function TicketDetailPage() {
             title={ticket ? `${ticket.ticketNumber} Details` : "Incident Details"}
             action={
                 <Link
-                    href="/dashboard"
+                    href={role === "user" ? "/tickets" : "/dashboard"}
                     className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors border border-white/10"
                 >
                     <ArrowLeft className="h-4 w-4" />
-                    Back to Queue
+                    {role === "user" ? "Back to My Tickets" : "Back to Queue"}
                 </Link>
             }
         >
             {loading ? (
-                <div className="bg-white rounded-2xl border border-slate-100 p-12 text-center text-xs text-slate-400 shadow-baligo">
-                    Loading clinical ticket timeline...
-                </div>
+                <TicketDetailSkeleton />
             ) : error || !ticket ? (
                 <div className="bg-white rounded-2xl border border-rose-200 p-8 text-center space-y-3 shadow-baligo">
                     <ShieldAlert className="h-8 w-8 text-rose-500 mx-auto" />
@@ -276,10 +275,10 @@ export default function TicketDetailPage() {
                     <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => router.push("/dashboard")}
+                        onClick={() => router.push(role === "user" ? "/tickets" : "/dashboard")}
                         className="rounded-xl"
                     >
-                        Return to Queue
+                        Return to Tickets
                     </Button>
                 </div>
             ) : (
@@ -289,7 +288,7 @@ export default function TicketDetailPage() {
                         {/* Main Incident Card */}
                         <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
                             <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                     <span className="font-mono text-xs font-bold px-3 py-1 rounded-xl bg-[#141738] text-[#00D2B4]">
                                         {ticket.ticketNumber}
                                     </span>
@@ -314,13 +313,15 @@ export default function TicketDetailPage() {
                                     </Badge>
                                 </div>
 
-                                <SLACountdown
-                                    status={ticket.status}
-                                    responseDueDate={ticket.responseDueDate}
-                                    resolutionDueDate={ticket.resolutionDueDate}
-                                    firstRespondedAt={ticket.firstRespondedAt}
-                                    slaBreached={ticket.slaBreached}
-                                />
+                                {role !== "user" && (
+                                    <SLACountdown
+                                        status={ticket.status}
+                                        responseDueDate={ticket.responseDueDate}
+                                        resolutionDueDate={ticket.resolutionDueDate}
+                                        firstRespondedAt={ticket.firstRespondedAt}
+                                        slaBreached={ticket.slaBreached}
+                                    />
+                                )}
                             </div>
 
                             <h1 className="text-xl font-bold text-slate-900 leading-snug">
@@ -334,7 +335,7 @@ export default function TicketDetailPage() {
                             {ticket.attachments && ticket.attachments.length > 0 && (
                                 <div className="space-y-1.5 pt-2">
                                     <div className="text-xs font-semibold text-slate-400">
-                                        Attached Diagnostic Files:
+                                        Attached Files:
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         {ticket.attachments.map((att, i) => (
@@ -354,15 +355,20 @@ export default function TicketDetailPage() {
                             )}
 
                             <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 text-xs text-slate-400">
-                                <div>
-                                    Reported by{" "}
-                                    <strong className="text-slate-700">
-                                        {ticket.createdBy.name}
-                                    </strong>{" "}
-                                    ({ticket.createdBy.facility || "Medical Center"})
+                                <div className="flex items-center gap-1.5">
+                                    <span>Submitted:</span>
+                                    <strong className="text-slate-600 font-medium">
+                                        {new Date(ticket.createdAt).toLocaleString(undefined, {
+                                            month: "short",
+                                            day: "numeric",
+                                            year: "numeric",
+                                            hour: "2-digit",
+                                            minute: "2-digit",
+                                        })}
+                                    </strong>
                                 </div>
-                                <div className="font-mono">
-                                    Logged: {new Date(ticket.createdAt).toLocaleString()}
+                                <div className="text-slate-500">
+                                    Facility: <strong className="text-slate-700">{ticket.createdBy?.facility || "Main Medical Center"}</strong>
                                 </div>
                             </div>
                         </div>
@@ -439,9 +445,9 @@ export default function TicketDetailPage() {
                         {ticket.status !== "Closed" ? (
                             <form
                                 onSubmit={handlePostMessage}
-                                className="bg-white rounded-2xl border border-slate-100 p-6 shadow-baligo space-y-4"
+                                className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6 shadow-baligo space-y-4"
                             >
-                                <div className="flex items-center justify-between">
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
                                     <span className="text-xs font-bold text-slate-800">
                                         Add Reply or Diagnostic Update
                                     </span>
@@ -487,7 +493,7 @@ export default function TicketDetailPage() {
                                     </div>
                                 )}
 
-                                <div className="flex items-center justify-between pt-1">
+                                <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
                                     <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900">
                                         <Paperclip className="h-3.5 w-3.5" />
                                         <span>
@@ -530,167 +536,255 @@ export default function TicketDetailPage() {
                         )}
                     </div>
 
-                    {/* Right 4 cols: Controls & SLA Metadata */}
+                    {/* Right 4 cols: Controls & Information */}
                     <div className="lg:col-span-4 space-y-6 w-full min-w-0">
-                        {/* Incident Controls */}
-                        <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                Incident Controls
-                            </h3>
-
-                            {role === "user" && ticket.status !== "Closed" && (
-                                <div className="space-y-2">
-                                    <p className="text-xs text-slate-500">
-                                        Has your clinical issue been resolved? You can close this ticket at any time.
-                                    </p>
-                                    <Button
-                                        onClick={() => handleUpdateTicket({ status: "Closed" })}
-                                        disabled={updatingMeta}
-                                        variant="outline"
-                                        className="w-full text-xs rounded-xl border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-semibold"
-                                    >
-                                        <CheckCircle2 className="h-4 w-4 mr-1.5 text-emerald-600" />
-                                        Mark Incident as Closed
-                                    </Button>
-                                </div>
-                            )}
-
-                            {(role === "agent" || role === "admin") && (
-                                <div className="space-y-3">
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-semibold text-slate-700">
+                        {role === "user" ? (
+                            /* User Friendly Right Sidebar */
+                            <>
+                                {/* Ticket Status Summary Card */}
+                                <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
+                                    <div className="flex items-center justify-between">
+                                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
                                             Ticket Status
-                                        </label>
-                                        <Select
-                                            value={ticket.status || undefined}
-                                            disabled={updatingMeta}
-                                            onValueChange={(val) => {
-                                                if (val) handleUpdateTicket({ status: val });
-                                            }}
+                                        </h3>
+                                        <Badge
+                                            variant="outline"
+                                            className="text-xs rounded-lg font-bold text-[#6052E9] border-purple-200 bg-purple-50"
                                         >
-                                            <SelectTrigger className="h-9 text-xs w-full rounded-xl">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="Open">Open</SelectItem>
-                                                <SelectItem value="In Progress">In Progress</SelectItem>
-                                                <SelectItem value="Waiting on User">Waiting on User</SelectItem>
-                                                <SelectItem value="Resolved">Resolved</SelectItem>
-                                                <SelectItem value="Closed">Closed</SelectItem>
-                                            </SelectContent>
-                                        </Select>
+                                            {ticket.status}
+                                        </Badge>
                                     </div>
 
-                                    <div className="space-y-1">
-                                        <label className="text-xs font-semibold text-slate-700">
-                                            Priority Level
-                                        </label>
-                                        <Select
-                                            value={ticket.priority || undefined}
-                                            disabled={updatingMeta}
-                                            onValueChange={(val) => {
-                                                if (val) handleUpdateTicket({ priority: val });
-                                            }}
-                                        >
-                                            <SelectTrigger className="h-9 text-xs w-full rounded-xl">
-                                                <SelectValue />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="Low">Low (24h/72h)</SelectItem>
-                                                <SelectItem value="Medium">Medium (8h/48h)</SelectItem>
-                                                <SelectItem value="High">High (4h/24h)</SelectItem>
-                                                <SelectItem value="Urgent">Urgent (1h/8h)</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-                            )}
+                                    <p className="text-xs text-slate-500 leading-relaxed bg-[#F8FAFC] p-3 rounded-xl border border-slate-100">
+                                        {ticket.status === "Open" && "Your incident report has been received and queued. A support engineer will review it shortly."}
+                                        {ticket.status === "In Progress" && "A support engineer is actively investigating and working on this incident."}
+                                        {ticket.status === "Waiting on User" && "The engineer has requested additional details. Please reply to the thread to continue."}
+                                        {ticket.status === "Resolved" && "Our engineering team has marked this incident as resolved. Please verify your system."}
+                                        {ticket.status === "Closed" && "This incident has been resolved and archived."}
+                                    </p>
 
-                            {role === "admin" && (
-                                <div className="space-y-1 pt-3 border-t border-slate-100">
-                                    <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                                        <UserCheck className="h-3.5 w-3.5 text-[#6052E9]" />
-                                        Assign Engineer
-                                    </label>
-                                    <Select
-                                        value={ticket.assignedAgent?._id || "UNASSIGNED"}
-                                        disabled={updatingMeta}
-                                        onValueChange={(val) =>
-                                            handleUpdateTicket({
-                                                assignedAgent: val === "UNASSIGNED" ? null : val,
-                                            })
-                                        }
-                                    >
-                                        <SelectTrigger className="h-9 text-xs w-full rounded-xl">
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="UNASSIGNED">-- Unassigned --</SelectItem>
-                                            {agents.map((ag) => (
-                                                <SelectItem key={ag._id} value={ag._id}>
-                                                    {ag.name}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* SLA Compliance Deadlines */}
-                        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-3 text-xs">
-                            <h3 className="font-bold uppercase tracking-wider text-slate-400">
-                                SLA Compliance Deadlines
-                            </h3>
-
-                            <div className="space-y-2 font-mono">
-                                <div className="flex justify-between py-1.5 border-b border-slate-100">
-                                    <span className="text-slate-400">First Response Due:</span>
-                                    <span className="text-slate-900 font-semibold">
-                                        {new Date(ticket.responseDueDate).toLocaleString()}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between py-1.5 border-b border-slate-100">
-                                    <span className="text-slate-400">First Responded At:</span>
-                                    <span className="text-emerald-600 font-semibold">
-                                        {ticket.firstRespondedAt
-                                            ? new Date(ticket.firstRespondedAt).toLocaleString()
-                                            : "Pending Reply"}
-                                    </span>
-                                </div>
-                                <div className="flex justify-between py-1.5">
-                                    <span className="text-slate-400">Resolution Due:</span>
-                                    <span className="text-slate-900 font-semibold">
-                                        {new Date(ticket.resolutionDueDate).toLocaleString()}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Audit Activity Log */}
-                        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-4">
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                                <History className="h-3.5 w-3.5" />
-                                Audit Activity Log ({activityLogs.length})
-                            </h3>
-
-                            <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                                {activityLogs.map((log) => (
-                                    <div
-                                        key={log._id}
-                                        className="text-xs border-l-2 border-purple-300 pl-3 py-0.5 space-y-0.5"
-                                    >
-                                        <div className="font-semibold text-slate-800">
-                                            {log.details}
+                                    <div className="space-y-3 pt-2 text-xs">
+                                        <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+                                            <span className="text-slate-400 font-medium">Assigned Support</span>
+                                            {ticket.assignedAgent ? (
+                                                <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                                    <span>{ticket.assignedAgent.name.split(" (")[0]}</span>
+                                                </div>
+                                            ) : (
+                                                <span className="font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] uppercase">
+                                                    In Triage Queue
+                                                </span>
+                                            )}
                                         </div>
-                                        <div className="text-[11px] font-mono text-slate-400">
-                                            {log.actor?.name || "System"} •{" "}
-                                            {new Date(log.createdAt).toLocaleString()}
+
+                                        <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
+                                            <span className="text-slate-400 font-medium">Category</span>
+                                            <span className="font-semibold text-slate-800">
+                                                {ticket.category?.name || "General IT"}
+                                            </span>
+                                        </div>
+
+                                        <div className="flex items-center justify-between py-1.5">
+                                            <span className="text-slate-400 font-medium">Priority Level</span>
+                                            <Badge
+                                                variant="outline"
+                                                className={`text-[11px] rounded-lg px-2 py-0.5 font-bold ${
+                                                    ticket.priority === "Urgent"
+                                                        ? "bg-rose-50 text-rose-700 border-rose-200"
+                                                        : "bg-slate-50 text-slate-700"
+                                                }`}
+                                            >
+                                                {ticket.priority}
+                                            </Badge>
                                         </div>
                                     </div>
-                                ))}
-                            </div>
-                        </div>
+
+                                    {ticket.status !== "Closed" && (
+                                        <div className="pt-3 border-t border-slate-100">
+                                            <p className="text-[11px] text-slate-400 mb-2">
+                                                Has your issue been resolved?
+                                            </p>
+                                            <Button
+                                                onClick={() => handleUpdateTicket({ status: "Closed" })}
+                                                disabled={updatingMeta}
+                                                variant="outline"
+                                                className="w-full text-xs rounded-xl border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-bold cursor-pointer"
+                                            >
+                                                <CheckCircle2 className="h-4 w-4 mr-1.5 text-emerald-600" />
+                                                Close Incident Ticket
+                                            </Button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Clinical IT Emergency Contact Card (Baligo midnight navy) */}
+                                <div className="bg-[#141738] text-white rounded-2xl p-5 sm:p-6 border border-white/5 shadow-baligo space-y-3">
+                                    <div className="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider">
+                                        <PhoneCall className="h-3.5 w-3.5" />
+                                        Hospital IT Operations
+                                    </div>
+                                    <h4 className="text-sm font-bold text-white">
+                                        Critical Patient System Down?
+                                    </h4>
+                                    <p className="text-xs text-slate-300 leading-relaxed">
+                                        For operating room or immediate patient care downtime, dial SOC helpline:
+                                    </p>
+                                    <div className="py-1">
+                                        <div className="text-2xl font-black text-[#00D2B4] font-mono">
+                                            EXT 4040
+                                        </div>
+                                        <div className="text-[10px] text-slate-400">
+                                            24/7 Priority Emergency Dispatch
+                                        </div>
+                                    </div>
+                                </div>
+                            </>
+                        ) : (
+                            /* Agent & Admin Right Sidebar with Controls, SLA, & Audit */
+                            <>
+                                {/* Incident Controls */}
+                                <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                                        Incident Controls
+                                    </h3>
+
+                                    <div className="space-y-3">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-semibold text-slate-700">
+                                                Ticket Status
+                                            </label>
+                                            <Select
+                                                value={ticket.status || undefined}
+                                                disabled={updatingMeta}
+                                                onValueChange={(val) => {
+                                                    if (val) handleUpdateTicket({ status: val });
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-9 text-xs w-full rounded-xl">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Open">Open</SelectItem>
+                                                    <SelectItem value="In Progress">In Progress</SelectItem>
+                                                    <SelectItem value="Waiting on User">Waiting on User</SelectItem>
+                                                    <SelectItem value="Resolved">Resolved</SelectItem>
+                                                    <SelectItem value="Closed">Closed</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-semibold text-slate-700">
+                                                Priority Level
+                                            </label>
+                                            <Select
+                                                value={ticket.priority || undefined}
+                                                disabled={updatingMeta}
+                                                onValueChange={(val) => {
+                                                    if (val) handleUpdateTicket({ priority: val });
+                                                }}
+                                            >
+                                                <SelectTrigger className="h-9 text-xs w-full rounded-xl">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="Low">Low (24h/72h)</SelectItem>
+                                                    <SelectItem value="Medium">Medium (8h/48h)</SelectItem>
+                                                    <SelectItem value="High">High (4h/24h)</SelectItem>
+                                                    <SelectItem value="Urgent">Urgent (1h/8h)</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+
+                                    {role === "admin" && (
+                                        <div className="space-y-1 pt-3 border-t border-slate-100">
+                                            <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+                                                <UserCheck className="h-3.5 w-3.5 text-[#6052E9]" />
+                                                Assign Engineer
+                                            </label>
+                                            <Select
+                                                value={ticket.assignedAgent?._id || "UNASSIGNED"}
+                                                disabled={updatingMeta}
+                                                onValueChange={(val) =>
+                                                    handleUpdateTicket({
+                                                        assignedAgent: val === "UNASSIGNED" ? null : val,
+                                                    })
+                                                }
+                                            >
+                                                <SelectTrigger className="h-9 text-xs w-full rounded-xl">
+                                                    <SelectValue />
+                                                </SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="UNASSIGNED">-- Unassigned --</SelectItem>
+                                                    {agents.map((ag) => (
+                                                        <SelectItem key={ag._id} value={ag._id}>
+                                                            {ag.name}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* SLA Compliance Deadlines */}
+                                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-3 text-xs">
+                                    <h3 className="font-bold uppercase tracking-wider text-slate-400">
+                                        SLA Compliance Deadlines
+                                    </h3>
+
+                                    <div className="space-y-2 font-mono">
+                                        <div className="flex justify-between py-1.5 border-b border-slate-100">
+                                            <span className="text-slate-400">First Response Due:</span>
+                                            <span className="text-slate-900 font-semibold">
+                                                {new Date(ticket.responseDueDate).toLocaleString()}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between py-1.5 border-b border-slate-100">
+                                            <span className="text-slate-400">First Responded At:</span>
+                                            <span className="text-emerald-600 font-semibold">
+                                                {ticket.firstRespondedAt
+                                                    ? new Date(ticket.firstRespondedAt).toLocaleString()
+                                                    : "Pending Reply"}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between py-1.5">
+                                            <span className="text-slate-400">Resolution Due:</span>
+                                            <span className="text-slate-900 font-semibold">
+                                                {new Date(ticket.resolutionDueDate).toLocaleString()}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Audit Activity Log */}
+                                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-4">
+                                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                                        <History className="h-3.5 w-3.5" />
+                                        Audit Activity Log ({activityLogs.length})
+                                    </h3>
+
+                                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                                        {activityLogs.map((log) => (
+                                            <div
+                                                key={log._id}
+                                                className="text-xs border-l-2 border-purple-300 pl-3 py-0.5 space-y-0.5"
+                                            >
+                                                <div className="font-semibold text-slate-800">
+                                                    {log.details}
+                                                </div>
+                                                <div className="text-[11px] font-mono text-slate-400">
+                                                    {log.actor?.name || "System"} •{" "}
+                                                    {new Date(log.createdAt).toLocaleString()}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

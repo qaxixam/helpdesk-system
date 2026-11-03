@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { ActivitySkeleton } from "@/components/ui/skeleton";
 import {
     Activity,
     PlusCircle,
@@ -163,9 +164,9 @@ export default function ActivityPage() {
         >
             <div className="space-y-6 w-full min-w-0">
                 {/* Activity Feed Container */}
-                <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-5 w-full min-w-0 overflow-hidden">
+                <div className="bg-white rounded-2xl p-3.5 sm:p-6 border border-slate-100 shadow-baligo space-y-4 sm:space-y-5 w-full min-w-0 overflow-hidden">
                     {/* Header & Filter Pills */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-4">
                         <div className="flex items-center gap-2">
                             <Activity className="h-4 w-4 text-[#6052E9]" />
                             <h2 className="text-base font-bold text-slate-900 tracking-tight">
@@ -176,8 +177,8 @@ export default function ActivityPage() {
                             </span>
                         </div>
 
-                        {/* Filter Tabs */}
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                        {/* Filter Tabs (Horizontally scrollable on small screens) */}
+                        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 sm:pb-0 scrollbar-none">
                             <Filter className="h-3.5 w-3.5 text-slate-400 mr-1 hidden sm:inline" />
                             <button
                                 onClick={() => setFilter("ALL")}
@@ -231,8 +232,8 @@ export default function ActivityPage() {
 
                     {/* Timeline List */}
                     {loading ? (
-                        <div className="p-12 text-center text-xs text-slate-400">
-                            Loading activity stream...
+                        <div className="p-4">
+                            <ActivitySkeleton count={5} />
                         </div>
                     ) : filteredActivities.length === 0 ? (
                         <div className="p-12 text-center space-y-2">

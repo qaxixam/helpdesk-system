@@ -8,6 +8,7 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { SLACountdown } from "@/components/sla-countdown";
 import { CreateTicketModal } from "@/components/create-ticket-modal";
 import { StatCard } from "@/components/ui/stat-card";
+import { TableSkeleton, StatCardsSkeleton } from "@/components/ui/skeleton";
 import { RadialGauge } from "@/components/ui/radial-gauge";
 import { AnalyticsBarChart } from "@/components/ui/analytics-bar-chart";
 import { Button } from "@/components/ui/button";
@@ -248,10 +249,12 @@ export default function DashboardPage() {
             }
         >
             <div className="space-y-6 w-full min-w-0">
-                {/* 1. ROLE-SPECIFIC OVERLAPPING METRICS CARDS */}
-                {role === "user" ? (
+                {/* 1. ROLE-SPECIFIC OVERLAPPING METRICS CARDS (Hidden on small mobile screens per user request) */}
+                {loading ? (
+                    <StatCardsSkeleton count={4} />
+                ) : role === "user" ? (
                     /* User Cards: Total Tickets, In Progress, Awaiting Reply, Resolved */
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
+                    <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
                         <StatCard
                             label="Total Tickets"
                             value={pagination.totalCount}
@@ -283,7 +286,7 @@ export default function DashboardPage() {
                     </div>
                 ) : role === "agent" ? (
                     /* Agent Cards: My Workload, Urgent <1h, SLA Breached, Resolution Rate */
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
+                    <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
                         <StatCard
                             label="My Assigned Queue"
                             value={pagination.totalCount}
@@ -315,7 +318,7 @@ export default function DashboardPage() {
                     </div>
                 ) : (
                     /* Admin Cards: Total System, Active Queue, Breached, Unassigned */
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
+                    <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
                         <StatCard
                             label="Total Hospital Incidents"
                             value={pagination.totalCount}
@@ -521,9 +524,7 @@ export default function DashboardPage() {
                     {/* Table View */}
                     <div className="overflow-hidden rounded-xl border border-slate-100 w-full min-w-0 max-w-full">
                         {loading ? (
-                            <div className="p-12 text-center text-xs text-slate-400">
-                                Loading clinical queue...
-                            </div>
+                            <TableSkeleton rows={5} cols={role === "user" ? 4 : 5} />
                         ) : tickets.length === 0 ? (
                             <div className="p-12 text-center space-y-3">
                                 <Inbox className="h-9 w-9 text-slate-300 mx-auto" />
@@ -550,19 +551,19 @@ export default function DashboardPage() {
                             </div>
                         ) : (
                             <div className="overflow-x-auto w-full max-w-full">
-                                <table className="w-full text-left border-collapse min-w-[700px]">
+                                <table className={`w-full text-left border-collapse ${role !== "user" ? "min-w-[700px]" : ""}`}>
                                     <thead>
                                         <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                            <th className="py-3 px-4">Ticket</th>
-                                            <th className="py-3 px-4">Incident Name</th>
+                                            <th className="py-3 px-3 sm:px-4">Ticket</th>
+                                            <th className="py-3 px-3 sm:px-4">Incident Name</th>
                                             {role !== "user" && <th className="py-3 px-4">Category</th>}
-                                            <th className="py-3 px-4">Priority</th>
-                                            <th className="py-3 px-4">Status</th>
+                                            <th className="py-3 px-4 hidden sm:table-cell">Priority</th>
+                                            <th className="py-3 px-4 hidden sm:table-cell">Status</th>
                                             {role !== "user" && <th className="py-3 px-4">SLA Countdown</th>}
                                             {role !== "user" && (
                                                 <th className="py-3 px-4">Requester & Facility</th>
                                             )}
-                                            <th className="py-3 px-4 text-right">Action</th>
+                                            <th className="py-3 px-3 sm:px-4 text-right">Action</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100 text-xs">
@@ -571,7 +572,7 @@ export default function DashboardPage() {
                                                 key={t._id}
                                                 className="hover:bg-slate-50/80 transition-colors group"
                                             >
-                                                <td className="py-3.5 px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                                                <td className="py-3 sm:py-3.5 px-3 sm:px-4 font-mono font-bold text-slate-900 whitespace-nowrap text-xs">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
                                                         className="text-[#6052E9] hover:underline"
@@ -580,14 +581,33 @@ export default function DashboardPage() {
                                                     </Link>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 max-w-xs">
+                                                <td className="py-3 sm:py-3.5 px-3 sm:px-4 max-w-[170px] sm:max-w-xs">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
-                                                        className="font-semibold text-slate-800 group-hover:text-[#6052E9] line-clamp-1"
+                                                        className="font-semibold text-slate-800 group-hover:text-[#6052E9] line-clamp-1 text-xs"
                                                     >
                                                         {t.title}
                                                     </Link>
-                                                    <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                                                    {/* Small screen inline metadata (Priority + Status) */}
+                                                    <div className="flex sm:hidden items-center gap-1.5 mt-1 flex-wrap">
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[9px] rounded-md px-1.5 py-0.2 ${priorityBadge(
+                                                                t.priority
+                                                            )}`}
+                                                        >
+                                                            {t.priority}
+                                                        </Badge>
+                                                        <Badge
+                                                            variant="outline"
+                                                            className={`text-[9px] rounded-md px-1.5 py-0.2 ${statusBadge(
+                                                                t.status
+                                                            )}`}
+                                                        >
+                                                            {t.status}
+                                                        </Badge>
+                                                    </div>
+                                                    <div className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 truncate">
                                                         Logged {new Date(t.createdAt).toLocaleDateString()}
                                                     </div>
                                                 </td>
@@ -598,7 +618,7 @@ export default function DashboardPage() {
                                                     </td>
                                                 )}
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <td className="py-3.5 px-4 whitespace-nowrap hidden sm:table-cell">
                                                     <Badge
                                                         variant="outline"
                                                         className={`text-[11px] rounded-lg px-2 py-0.5 ${priorityBadge(
@@ -609,7 +629,7 @@ export default function DashboardPage() {
                                                     </Badge>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap">
+                                                <td className="py-3.5 px-4 whitespace-nowrap hidden sm:table-cell">
                                                     <Badge
                                                         variant="outline"
                                                         className={`text-[11px] rounded-lg px-2 py-0.5 ${statusBadge(
@@ -645,12 +665,12 @@ export default function DashboardPage() {
                                                     </td>
                                                 )}
 
-                                                <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                                                <td className="py-3 sm:py-3.5 px-3 sm:px-4 text-right whitespace-nowrap">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
-                                                        className="inline-flex items-center gap-1 text-xs font-bold text-[#6052E9] hover:text-[#4F46E5] bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors"
+                                                        className="inline-flex items-center gap-1 text-xs font-bold text-[#6052E9] hover:text-[#4F46E5] bg-purple-50 hover:bg-purple-100 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors"
                                                     >
-                                                        {role === "agent" ? "Triage" : "View"}
+                                                        <span>View</span>
                                                         <ArrowUpRight className="h-3.5 w-3.5" />
                                                     </Link>
                                                 </td>
