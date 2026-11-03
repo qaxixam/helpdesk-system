@@ -22,6 +22,7 @@ export async function GET() {
             const ticketIds = userTickets.map((t) => t._id);
             query = {
                 $or: [{ actor: user.id }, { ticket: { $in: ticketIds } }],
+                action: { $ne: "INTERNAL_NOTE_ADDED" }, // Internal staff notes strictly hidden from requester
             };
         } else if (user.role === "agent") {
             const agentTickets = await Ticket.find({ assignedAgent: user.id }).select("_id").lean();

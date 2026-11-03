@@ -5,9 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { StatCard } from "@/components/ui/stat-card";
 import { CreateTicketModal } from "@/components/create-ticket-modal";
-import { SLACountdown } from "@/components/sla-countdown";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import {
@@ -173,25 +171,10 @@ export default function MyTicketsPage() {
         }
     };
 
-    const openCount = tickets.filter((t) => t.status === "Open" || t.status === "In Progress").length;
-    const waitingCount = tickets.filter((t) => t.status === "Waiting on User").length;
-    const resolvedCount = tickets.filter((t) => t.status === "Resolved" || t.status === "Closed").length;
-
     return (
         <DashboardShell
             title="My Tickets"
             subtitle="Complete catalog of your clinical incident reports, conversation status, and resolutions"
-            sidebarAction={
-                <CreateTicketModal
-                    categories={categories}
-                    onCreated={() => {
-                        setPage(1);
-                        fetchTickets();
-                    }}
-                    triggerText="Create Ticket"
-                    triggerClassName="w-full h-10 px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
-                />
-            }
             action={
                 <div className="flex items-center gap-2.5 flex-wrap">
                     <button
@@ -213,39 +196,7 @@ export default function MyTicketsPage() {
             }
         >
             <div className="space-y-6 w-full min-w-0">
-                {/* 1. Quick Stat Overview */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
-                    <StatCard
-                        label="Total Tickets"
-                        value={pagination.totalCount}
-                        change="+12.5%"
-                        isPositive={true}
-                        subtitle="All logged incidents"
-                    />
-                    <StatCard
-                        label="Under Triage"
-                        value={openCount}
-                        change={openCount > 0 ? "Active" : "All Clear"}
-                        isPositive={openCount === 0}
-                        subtitle="SOC engineer investigating"
-                    />
-                    <StatCard
-                        label="Awaiting My Reply"
-                        value={waitingCount}
-                        change={waitingCount > 0 ? "Action Needed" : "Up to date"}
-                        isPositive={waitingCount === 0}
-                        subtitle="Requires your input"
-                    />
-                    <StatCard
-                        label="Resolved"
-                        value={resolvedCount}
-                        change="Completed"
-                        isPositive={true}
-                        subtitle="Closed incidents"
-                    />
-                </div>
-
-                {/* 2. Main Full Ticket Management Container */}
+                {/* Main Full Ticket Management Container */}
                 <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-5 w-full min-w-0 overflow-hidden">
                     {/* Filter bar */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -381,11 +332,8 @@ export default function MyTicketsPage() {
                                         <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                                             <th className="py-3 px-4">Ticket</th>
                                             <th className="py-3 px-4">Incident Name</th>
-                                            <th className="py-3 px-4">Category</th>
                                             <th className="py-3 px-4">Priority</th>
                                             <th className="py-3 px-4">Status</th>
-                                            <th className="py-3 px-4">SLA Countdown</th>
-                                            <th className="py-3 px-4">Assigned Engineer</th>
                                             <th className="py-3 px-4 text-right">Action</th>
                                         </tr>
                                     </thead>
@@ -416,10 +364,6 @@ export default function MyTicketsPage() {
                                                     </div>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-600 font-medium">
-                                                    {t.category?.name || "General IT"}
-                                                </td>
-
                                                 <td className="py-3.5 px-4 whitespace-nowrap">
                                                     <Badge
                                                         variant="outline"
@@ -440,31 +384,6 @@ export default function MyTicketsPage() {
                                                     >
                                                         {t.status}
                                                     </Badge>
-                                                </td>
-
-                                                <td className="py-3.5 px-4 whitespace-nowrap">
-                                                    <SLACountdown
-                                                        status={t.status}
-                                                        responseDueDate={t.responseDueDate}
-                                                        resolutionDueDate={t.resolutionDueDate}
-                                                        firstRespondedAt={t.firstRespondedAt}
-                                                        slaBreached={t.slaBreached}
-                                                    />
-                                                </td>
-
-                                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
-                                                    {t.assignedAgent ? (
-                                                        <div className="flex items-center gap-1.5">
-                                                            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                                                            <span className="font-semibold text-slate-800">
-                                                                {t.assignedAgent.name.split(" (")[0]}
-                                                            </span>
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md uppercase tracking-wider">
-                                                            In Triage Queue
-                                                        </span>
-                                                    )}
                                                 </td>
 
                                                 <td className="py-3.5 px-4 text-right whitespace-nowrap">

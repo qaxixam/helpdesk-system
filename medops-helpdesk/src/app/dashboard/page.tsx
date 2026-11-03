@@ -214,19 +214,6 @@ export default function DashboardPage() {
         <DashboardShell
             title={pageHeaders.title}
             subtitle={pageHeaders.subtitle}
-            sidebarAction={
-                (role === "user" || role === "admin") ? (
-                    <CreateTicketModal
-                        categories={categories}
-                        onCreated={() => {
-                            setPage(1);
-                            fetchTickets();
-                        }}
-                        triggerText="Create Ticket"
-                        triggerClassName="w-full h-10 px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
-                    />
-                ) : undefined
-            }
             action={
                 <div className="flex items-center gap-2.5 flex-wrap">
                     <button

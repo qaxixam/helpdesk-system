@@ -23,7 +23,6 @@ import {
   Stethoscope,
   Wrench,
   Ticket,
-  Settings,
 } from "lucide-react";
 
 interface DashboardShellProps {
@@ -157,13 +156,11 @@ export function DashboardShell({
       { label: "SLA Matrix & Rules", href: "/dashboard#sla-rules", icon: BookOpen },
       { label: "My Activity Stream", href: "/dashboard#activity", icon: Activity },
     ],
-    user: [
-      { label: "Settings", href: "/dashboard#settings", icon: Settings },
-    ],
+    user: [],
   };
 
   const navItems = role === "admin" ? adminNav : role === "agent" ? agentNav : userNav;
-  const secondaryItems = secondaryNav[role as keyof typeof secondaryNav] || secondaryNav.user;
+  const secondaryItems = secondaryNav[role as keyof typeof secondaryNav] || [];
 
   const roleMeta = {
     admin: {
@@ -239,8 +236,8 @@ export function DashboardShell({
             </button>
           </div>
 
-          {/* Quick Search & Actions */}
-          {role !== "user" ? (
+          {/* Quick Search & Actions (Admin & Agent only) */}
+          {role !== "user" && (
             <div className="px-5 pt-5 pb-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
@@ -258,16 +255,10 @@ export function DashboardShell({
                 </div>
               )}
             </div>
-          ) : (
-            sidebarAction && (
-              <div className="px-5 pt-5 pb-2">
-                {sidebarAction}
-              </div>
-            )
           )}
 
           {/* Nav Items */}
-          <div className="flex-1 px-4 py-2 space-y-6">
+          <div className="flex-1 px-4 py-4 space-y-6">
             {/* Main Application Section */}
             <div>
               <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
@@ -308,28 +299,30 @@ export function DashboardShell({
               </div>
             </div>
 
-            {/* Secondary / Tools Section */}
-            <div>
-              <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-                {role === "admin" ? "Controls" : role === "agent" ? "Engineering SLA" : "Others"}
+            {/* Secondary / Tools Section (Only if items exist) */}
+            {secondaryItems.length > 0 && (
+              <div>
+                <div className="px-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
+                  {role === "admin" ? "Controls" : "Engineering SLA"}
+                </div>
+                <div className="space-y-1">
+                  {secondaryItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.label}
+                        href={item.href}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-all group"
+                      >
+                        <Icon className="h-4 w-4 text-slate-400 group-hover:text-slate-200 shrink-0" />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="space-y-1">
-                {secondaryItems.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <Link
-                      key={item.label}
-                      href={item.href}
-                      onClick={() => setMobileMenuOpen(false)}
-                      className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-medium text-slate-300 hover:text-white hover:bg-white/5 transition-all group"
-                    >
-                      <Icon className="h-4 w-4 text-slate-400 group-hover:text-slate-200 shrink-0" />
-                      <span className="truncate">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
+            )}
           </div>
 
           {/* User profile footer */}

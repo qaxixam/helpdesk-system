@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { StatCard } from "@/components/ui/stat-card";
 import {
     Activity,
     PlusCircle,
@@ -45,7 +44,6 @@ export default function ActivityPage() {
     const { data: session, status: sessionStatus } = useSession();
 
     const [activities, setActivities] = useState<ActivityItem[]>([]);
-    const [metrics, setMetrics] = useState({ totalCount: 0, myCreations: 0, myReplies: 0 });
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [filter, setFilter] = useState<"ALL" | "CREATION" | "REPLIES" | "STATUS">("ALL");
@@ -65,7 +63,6 @@ export default function ActivityPage() {
                 setError(data.error || "Failed to load activity stream");
             } else {
                 setActivities(data.activities || []);
-                setMetrics(data.metrics || { totalCount: 0, myCreations: 0, myReplies: 0 });
             }
         } catch {
             setError("Network error while loading activities");
@@ -83,7 +80,6 @@ export default function ActivityPage() {
             .then((data) => {
                 if (data.activities) {
                     setActivities(data.activities);
-                    setMetrics(data.metrics || { totalCount: 0, myCreations: 0, myReplies: 0 });
                 }
             })
             .catch(() => {})
@@ -96,10 +92,11 @@ export default function ActivityPage() {
 
     const currentUserId = session?.user?.id;
 
-    // Filter activities
+    // Filter activities (Strictly excluding any staff internal notes)
     const filteredActivities = activities.filter((item) => {
+        if (item.action === "INTERNAL_NOTE_ADDED") return false;
         if (filter === "CREATION") return item.action === "TICKET_CREATED";
-        if (filter === "REPLIES") return item.action === "REPLY_POSTED" || item.action === "INTERNAL_NOTE_ADDED";
+        if (filter === "REPLIES") return item.action === "REPLY_POSTED";
         if (filter === "STATUS") return item.action === "STATUS_CHANGED" || item.action === "ASSIGNED" || item.action === "PRIORITY_CHANGED";
         return true;
     });
@@ -165,32 +162,7 @@ export default function ActivityPage() {
             }
         >
             <div className="space-y-6 w-full min-w-0">
-                {/* 1. Quick Stats */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5 w-full min-w-0">
-                    <StatCard
-                        label="Total Activity Events"
-                        value={metrics.totalCount}
-                        change="+100%"
-                        isPositive={true}
-                        subtitle="Across all your tickets"
-                    />
-                    <StatCard
-                        label="Incidents You Created"
-                        value={metrics.myCreations}
-                        change="Logged"
-                        isPositive={true}
-                        subtitle="Submitted tickets"
-                    />
-                    <StatCard
-                        label="Your Conversation Replies"
-                        value={metrics.myReplies}
-                        change="Active"
-                        isPositive={true}
-                        subtitle="Messages sent to engineers"
-                    />
-                </div>
-
-                {/* 2. Activity Feed Card */}
+                {/* Activity Feed Container */}
                 <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-5 w-full min-w-0 overflow-hidden">
                     {/* Header & Filter Pills */}
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
