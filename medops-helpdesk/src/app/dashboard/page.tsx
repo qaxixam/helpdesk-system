@@ -386,106 +386,123 @@ export default function DashboardPage() {
 
                 {/* 3. INCIDENT TABLE CONTAINER */}
                 <div id="tickets" className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-5 w-full min-w-0 overflow-hidden">
-                    {/* Header & Role-Tailored Filters */}
+                    {/* Header & Role-Tailored Controls */}
                     <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                         <div>
-                            <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                                {role === "agent"
-                                    ? "Assigned Clinical Incident Queue"
-                                    : role === "admin"
-                                    ? "Hospital Clinical Incident Queue"
-                                    : "My Tickets"}
-                            </h2>
+                            <div className="flex items-center gap-2">
+                                <h2 className="text-base font-bold text-slate-900 tracking-tight">
+                                    {role === "agent"
+                                        ? "Assigned Clinical Incident Queue"
+                                        : role === "admin"
+                                        ? "Hospital Clinical Incident Queue"
+                                        : "My Tickets"}
+                                </h2>
+                                {role === "user" && pagination.totalCount > 0 && (
+                                    <span className="text-[11px] bg-purple-50 text-[#6052E9] font-bold px-2 py-0.5 rounded-full border border-purple-100">
+                                        {pagination.totalCount} total
+                                    </span>
+                                )}
+                            </div>
                             <p className="text-xs text-slate-400 mt-0.5">
                                 {role === "agent"
                                     ? "Showing tickets assigned to your queue with active SLA countdown timers"
                                     : role === "admin"
                                     ? "Full hospital clinical tickets view with assignee dispatch controls"
-                                    : "All tickets reported by you across clinical departments"}
+                                    : "Recent incident reports at a glance"}
                             </p>
                         </div>
 
                         {/* Search & Filters */}
-                        <div className="flex flex-wrap items-center gap-2.5">
-                            <div className="relative min-w-[180px]">
-                                <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                                <Input
-                                    placeholder="Search TKT or title..."
-                                    value={search}
-                                    onChange={(e) => {
-                                        setSearch(e.target.value);
-                                        setPage(1);
-                                    }}
-                                    className="pl-8 h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white"
-                                />
+                        {role === "user" ? (
+                            <div className="flex items-center gap-2.5">
+                                <Link
+                                    href="/tickets"
+                                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-[#6052E9] bg-purple-50 hover:bg-purple-100 border border-purple-100 rounded-xl transition"
+                                >
+                                    <span>View All in My Tickets</span>
+                                    <ArrowUpRight className="h-3.5 w-3.5" />
+                                </Link>
                             </div>
+                        ) : (
+                            <div className="flex flex-wrap items-center gap-2.5">
+                                <div className="relative min-w-[180px]">
+                                    <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                                    <Input
+                                        placeholder="Search TKT or title..."
+                                        value={search}
+                                        onChange={(e) => {
+                                            setSearch(e.target.value);
+                                            setPage(1);
+                                        }}
+                                        className="pl-8 h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white"
+                                    />
+                                </div>
 
-                            <Select
-                                value={statusFilter}
-                                onValueChange={(v) => {
-                                    if (v) {
-                                        setStatusFilter(v);
-                                        setPage(1);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[125px]">
-                                    <SelectValue placeholder="Status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">All Statuses</SelectItem>
-                                    <SelectItem value="Open">Open</SelectItem>
-                                    <SelectItem value="In Progress">In Progress</SelectItem>
-                                    <SelectItem value="Waiting on User">Waiting on User</SelectItem>
-                                    <SelectItem value="Resolved">Resolved</SelectItem>
-                                    <SelectItem value="Closed">Closed</SelectItem>
-                                </SelectContent>
-                            </Select>
+                                <Select
+                                    value={statusFilter}
+                                    onValueChange={(v) => {
+                                        if (v) {
+                                            setStatusFilter(v);
+                                            setPage(1);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[125px]">
+                                        <SelectValue placeholder="Status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">All Statuses</SelectItem>
+                                        <SelectItem value="Open">Open</SelectItem>
+                                        <SelectItem value="In Progress">In Progress</SelectItem>
+                                        <SelectItem value="Waiting on User">Waiting on User</SelectItem>
+                                        <SelectItem value="Resolved">Resolved</SelectItem>
+                                        <SelectItem value="Closed">Closed</SelectItem>
+                                    </SelectContent>
+                                </Select>
 
-                            <Select
-                                value={priorityFilter}
-                                onValueChange={(v) => {
-                                    if (v) {
-                                        setPriorityFilter(v);
-                                        setPage(1);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[125px]">
-                                    <SelectValue placeholder="Priority" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">All Priorities</SelectItem>
-                                    <SelectItem value="Urgent">Urgent (1h SLA)</SelectItem>
-                                    <SelectItem value="High">High (4h SLA)</SelectItem>
-                                    <SelectItem value="Medium">Medium (8h SLA)</SelectItem>
-                                    <SelectItem value="Low">Low (24h SLA)</SelectItem>
-                                </SelectContent>
-                            </Select>
+                                <Select
+                                    value={priorityFilter}
+                                    onValueChange={(v) => {
+                                        if (v) {
+                                            setPriorityFilter(v);
+                                            setPage(1);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[125px]">
+                                        <SelectValue placeholder="Priority" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">All Priorities</SelectItem>
+                                        <SelectItem value="Urgent">Urgent (1h SLA)</SelectItem>
+                                        <SelectItem value="High">High (4h SLA)</SelectItem>
+                                        <SelectItem value="Medium">Medium (8h SLA)</SelectItem>
+                                        <SelectItem value="Low">Low (24h SLA)</SelectItem>
+                                    </SelectContent>
+                                </Select>
 
-                            <Select
-                                value={categoryFilter}
-                                onValueChange={(v) => {
-                                    if (v) {
-                                        setCategoryFilter(v);
-                                        setPage(1);
-                                    }
-                                }}
-                            >
-                                <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[135px]">
-                                    <SelectValue placeholder="Category" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="ALL">All Categories</SelectItem>
-                                    {categories.map((c) => (
-                                        <SelectItem key={c._id} value={c._id}>
-                                            {c.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                                <Select
+                                    value={categoryFilter}
+                                    onValueChange={(v) => {
+                                        if (v) {
+                                            setCategoryFilter(v);
+                                            setPage(1);
+                                        }
+                                    }}
+                                >
+                                    <SelectTrigger className="h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 w-[135px]">
+                                        <SelectValue placeholder="Category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="ALL">All Categories</SelectItem>
+                                        {categories.map((c) => (
+                                            <SelectItem key={c._id} value={c._id}>
+                                                {c.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
 
-                            {(role === "agent" || role === "admin") && (
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -503,8 +520,8 @@ export default function DashboardPage() {
                                     )}
                                     SLA Breached Only
                                 </button>
-                            )}
-                        </div>
+                            </div>
+                        )}
                     </div>
 
                     {error && (
@@ -550,14 +567,14 @@ export default function DashboardPage() {
                                     <thead>
                                         <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                                             <th className="py-3 px-4">Ticket</th>
-                                            <th className="py-3 px-4">Incident Summary</th>
-                                            <th className="py-3 px-4">Category</th>
+                                            <th className="py-3 px-4">Incident Name</th>
+                                            {role !== "user" && <th className="py-3 px-4">Category</th>}
                                             <th className="py-3 px-4">Priority</th>
                                             <th className="py-3 px-4">Status</th>
-                                            <th className="py-3 px-4">SLA Countdown</th>
-                                            <th className="py-3 px-4">
-                                                {role === "user" ? "Assigned Engineer" : "Requester & Facility"}
-                                            </th>
+                                            {role !== "user" && <th className="py-3 px-4">SLA Countdown</th>}
+                                            {role !== "user" && (
+                                                <th className="py-3 px-4">Requester & Facility</th>
+                                            )}
                                             <th className="py-3 px-4 text-right">Action</th>
                                         </tr>
                                     </thead>
@@ -588,9 +605,11 @@ export default function DashboardPage() {
                                                     </div>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-600 font-medium">
-                                                    {t.category?.name || "General IT"}
-                                                </td>
+                                                {role !== "user" && (
+                                                    <td className="py-3.5 px-4 whitespace-nowrap text-slate-600 font-medium">
+                                                        {t.category?.name || "General IT"}
+                                                    </td>
+                                                )}
 
                                                 <td className="py-3.5 px-4 whitespace-nowrap">
                                                     <Badge
@@ -614,31 +633,20 @@ export default function DashboardPage() {
                                                     </Badge>
                                                 </td>
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap">
-                                                    <SLACountdown
-                                                        status={t.status}
-                                                        responseDueDate={t.responseDueDate}
-                                                        resolutionDueDate={t.resolutionDueDate}
-                                                        firstRespondedAt={t.firstRespondedAt}
-                                                        slaBreached={t.slaBreached}
-                                                    />
-                                                </td>
+                                                {role !== "user" && (
+                                                    <td className="py-3.5 px-4 whitespace-nowrap">
+                                                        <SLACountdown
+                                                            status={t.status}
+                                                            responseDueDate={t.responseDueDate}
+                                                            resolutionDueDate={t.resolutionDueDate}
+                                                            firstRespondedAt={t.firstRespondedAt}
+                                                            slaBreached={t.slaBreached}
+                                                        />
+                                                    </td>
+                                                )}
 
-                                                <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
-                                                    {role === "user" ? (
-                                                        t.assignedAgent ? (
-                                                            <div className="flex items-center gap-1.5">
-                                                                <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                                                                <span className="font-semibold text-slate-800">
-                                                                    {t.assignedAgent.name.split(" (")[0]}
-                                                                </span>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md uppercase tracking-wider">
-                                                                In Triage Queue
-                                                            </span>
-                                                        )
-                                                    ) : (
+                                                {role !== "user" && (
+                                                    <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
                                                         <div>
                                                             <span className="font-semibold text-slate-800">
                                                                 {t.createdBy?.name || "Requester"}
@@ -647,16 +655,16 @@ export default function DashboardPage() {
                                                                 {t.createdBy?.facility || "Main Clinic"}
                                                             </div>
                                                         </div>
-                                                    )}
-                                                </td>
+                                                    </td>
+                                                )}
 
                                                 <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                     <Link
                                                         href={`/tickets/${t._id}`}
-                                                        className="inline-flex items-center gap-1 text-xs font-semibold text-[#6052E9] hover:text-[#4F46E5] bg-purple-50 hover:bg-purple-100 px-2.5 py-1 rounded-lg transition-colors"
+                                                        className="inline-flex items-center gap-1 text-xs font-bold text-[#6052E9] hover:text-[#4F46E5] bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors"
                                                     >
                                                         {role === "agent" ? "Triage" : "View"}
-                                                        <ArrowUpRight className="h-3 w-3" />
+                                                        <ArrowUpRight className="h-3.5 w-3.5" />
                                                     </Link>
                                                 </td>
                                             </tr>
@@ -666,37 +674,50 @@ export default function DashboardPage() {
                             </div>
                         )}
 
-                        {/* Pagination */}
-                        <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 flex items-center justify-between text-xs text-slate-500">
-                            <div>
-                                Page <span className="font-bold text-slate-800">{pagination.page}</span> of{" "}
-                                <span className="font-bold text-slate-800">{pagination.totalPages}</span> (
-                                {pagination.totalCount} incidents)
+                        {/* Pagination / Footer */}
+                        {role === "user" ? (
+                            <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
+                                <span>Showing {tickets.length} recent clinical incidents</span>
+                                <Link
+                                    href="/tickets"
+                                    className="font-bold text-[#6052E9] hover:underline inline-flex items-center gap-1"
+                                >
+                                    <span>View all tickets in My Tickets</span>
+                                    <ArrowUpRight className="h-3.5 w-3.5" />
+                                </Link>
                             </div>
+                        ) : (
+                            <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-3.5 flex items-center justify-between text-xs text-slate-500">
+                                <div>
+                                    Page <span className="font-bold text-slate-800">{pagination.page}</span> of{" "}
+                                    <span className="font-bold text-slate-800">{pagination.totalPages}</span> (
+                                    {pagination.totalCount} incidents)
+                                </div>
 
-                            <div className="flex items-center gap-1.5">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={page <= 1 || loading}
-                                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                    className="h-8 px-2.5 text-xs rounded-lg"
-                                >
-                                    <ChevronLeft className="h-3.5 w-3.5 mr-0.5" />
-                                    Prev
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={page >= pagination.totalPages || loading}
-                                    onClick={() => setPage((p) => p + 1)}
-                                    className="h-8 px-2.5 text-xs rounded-lg"
-                                >
-                                    Next
-                                    <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
-                                </Button>
+                                <div className="flex items-center gap-1.5">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={page <= 1 || loading}
+                                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                        className="h-8 px-2.5 text-xs rounded-lg"
+                                    >
+                                        <ChevronLeft className="h-3.5 w-3.5 mr-0.5" />
+                                        Prev
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        disabled={page >= pagination.totalPages || loading}
+                                        onClick={() => setPage((p) => p + 1)}
+                                        className="h-8 px-2.5 text-xs rounded-lg"
+                                    >
+                                        Next
+                                        <ChevronRight className="h-3.5 w-3.5 ml-0.5" />
+                                    </Button>
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
             </div>
