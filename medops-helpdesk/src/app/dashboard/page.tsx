@@ -80,8 +80,10 @@ export default function DashboardPage() {
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
             router.push("/login");
+        } else if (sessionStatus === "authenticated" && session?.user?.role === "admin") {
+            router.replace("/admin");
         }
-    }, [sessionStatus, router]);
+    }, [sessionStatus, session?.user?.role, router]);
 
     const fetchTickets = useCallback(async () => {
         try {
@@ -195,6 +197,17 @@ export default function DashboardPage() {
 
     const user = session?.user;
     const role = user?.role || "user";
+
+    if (sessionStatus === "authenticated" && role === "admin") {
+        return (
+            <div className="min-h-screen bg-[#F4F6FB] flex items-center justify-center text-xs text-slate-500 font-sans">
+                <div className="flex flex-col items-center gap-3">
+                    <div className="w-8 h-8 rounded-full border-2 border-[#5b4fe9] border-t-transparent animate-spin" />
+                    <span>Opening Admin Overview...</span>
+                </div>
+            </div>
+        );
+    }
 
     // Role-specific calculations
     const openCount = tickets.filter((t) => t.status === "Open" || t.status === "In Progress").length;

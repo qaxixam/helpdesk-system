@@ -15,9 +15,7 @@ import {
   AlertTriangle,
   Clock,
   CheckCircle2,
-  Layers,
   BookOpen,
-  UserCheck,
   Search,
   ShieldCheck,
   Stethoscope,
@@ -45,7 +43,7 @@ interface NavItem {
 export function DashboardShell({
   children,
   title = "Performance Dashboard",
-  subtitle = "Real-time IT Operations & Healthcare Incident Management",
+  subtitle = "",
   action,
   sidebarAction,
 }: DashboardShellProps) {
@@ -60,34 +58,28 @@ export function DashboardShell({
   // Role-specific navigation items strictly reflecting backend capabilities
   const adminNav: NavItem[] = [
     {
-      label: "Overview & Analytics",
+      label: "Overview",
       href: "/admin",
       icon: BarChart3,
       active: pathname === "/admin",
     },
     {
-      label: "All Clinical Incidents",
-      href: "/dashboard",
-      icon: LayoutGrid,
-      active: pathname === "/dashboard",
+      label: "Tickets",
+      href: "/admin/tickets",
+      icon: Ticket,
+      active: pathname.startsWith("/admin/tickets"),
     },
     {
-      label: "Task Assignment",
-      href: "/admin#assignment",
-      icon: UserCheck,
-      active: false,
+      label: "Activity",
+      href: "/admin/activity",
+      icon: Activity,
+      active: pathname.startsWith("/admin/activity"),
     },
     {
-      label: "Support Engineers",
-      href: "/admin#users",
+      label: "Team",
+      href: "/admin/team",
       icon: Users,
-      active: false,
-    },
-    {
-      label: "Categories & SLAs",
-      href: "/admin#categories",
-      icon: Layers,
-      active: false,
+      active: pathname.startsWith("/admin/team"),
     },
   ];
 
@@ -200,9 +192,8 @@ export function DashboardShell({
 
       {/* Role-Specific Midnight Navy Sidebar (#141738) */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#141738] text-white flex flex-col justify-between transition-transform duration-300 ease-in-out lg:translate-x-0 ${
-          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-        }`}
+        className={`fixed inset-y-0 left-0 z-50 w-64 bg-[#141738] text-white flex flex-col justify-between transition-transform duration-300 ease-in-out lg:translate-x-0 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+          }`}
       >
         <div className="flex flex-col h-full overflow-y-auto">
           {/* Brand Header */}
@@ -272,19 +263,17 @@ export function DashboardShell({
                       key={item.label}
                       href={item.href}
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all group ${
-                        item.active
+                      className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all group ${item.active
                           ? "bg-[#23274F] text-white shadow-xs font-bold"
                           : "text-slate-300 hover:text-white hover:bg-white/5"
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center gap-3 min-w-0">
                         <Icon
-                          className={`h-4 w-4 shrink-0 transition-colors ${
-                            item.active
+                          className={`h-4 w-4 shrink-0 transition-colors ${item.active
                               ? "text-[#00D2B4]"
                               : "text-slate-400 group-hover:text-slate-200"
-                          }`}
+                            }`}
                         />
                         <span className="truncate">{item.label}</span>
                       </div>

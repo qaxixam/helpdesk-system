@@ -31,29 +31,36 @@ export async function GET() {
                 $or: [{ actor: user.id }, { ticket: { $in: ticketIds } }],
             };
         }
+        // Admin sees all activities across the entire system
 
         const activities = await ActivityLog.find(query)
             .sort({ createdAt: -1 })
-            .limit(60)
+            .limit(100)
             .populate("ticket", "ticketNumber title priority status")
             .populate("actor", "name email role facility")
             .lean();
 
-        // Calculate summary metrics for user
+        // Calculate summary metrics
         const totalCount = activities.length;
-        const myCreations = activities.filter(
-            (a) => a.action === "TICKET_CREATED" && String((a.actor as { _id?: string })?._id || a.actor) === user.id
-        ).length;
-        const myReplies = activities.filter(
-            (a) => a.action === "REPLY_POSTED" && String((a.actor as { _id?: string })?._id || a.actor) === user.id
-        ).length;
+        const ticketCreations = activities.filter((a) => a.action === "TICKET_CREATED").length;
+        const replies = activities.filter((a) => a.action === "REPLY_POSTED").length;
+        const statusChanges = activities.filter((a) => a.action === "STATUS_CHANGED").length;
+        const assignments = activities.filter((a) => a.action === "ASSIGNED").length;
 
         return NextResponse.json({
             activities,
             metrics: {
                 totalCount,
-                myCreations,
-                myReplies,
+                ticketCreations,
+                replies,
+                statusChanges,
+                assignments,
+                myCreations: activities.filter(
+                    (a) => a.action === "TICKET_CREATED" && String((a.actor as unknown as { _id?: unknown })?._id || a.actor) === user.id
+                ).length,
+                myReplies: activities.filter(
+                    (a) => a.action === "REPLY_POSTED" && String((a.actor as unknown as { _id?: unknown })?._id || a.actor) === user.id
+                ).length,
             },
         });
     } catch (error) {
@@ -64,4 +71,3 @@ export async function GET() {
         );
     }
 }
-

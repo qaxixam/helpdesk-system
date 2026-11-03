@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { StatCard } from "@/components/ui/stat-card";
 import { RadialGauge } from "@/components/ui/radial-gauge";
-import { CreateCategoryModal } from "@/components/create-category-modal";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -21,60 +21,77 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-    BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+    AreaChart, Area, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import {
-    RefreshCw, Zap, UserPlus, Clock,
+    RefreshCw, Zap, UserPlus, ArrowRight, Layers, UserCheck, CheckCircle2,
 } from "lucide-react";
 
-interface TicketItem {
+interface TicketSummaryItem {
     _id: string;
+    ticketNumber: string;
     title: string;
     status: string;
     priority: string;
     category?: { name: string };
+    createdBy?: { name: string; email: string; facility?: string };
     assignedAgent?: { _id: string; name: string; email: string };
     createdAt: string;
     slaBreached: boolean;
 }
 
-interface AgentItem {
-    _id: string;
-    name: string;
-    email: string;
-}
-
-interface CategoryItem {
-    _id: string;
-    name: string;
-    description: string;
-    defaultPriority: "Low" | "Medium" | "High" | "Urgent";
-}
-
 interface AnalyticsData {
     summary: {
         totalTickets: number;
-        openTicketsCount: number;
+        openTickets: number;
+        inProgressTickets: number;
+        resolvedClosedTickets: number;
         slaBreachCount: number;
+        slaComplianceRate: number;
         avgFirstResponseMinutes: number;
         unassignedCount: number;
     };
-    ticketsByStatus: { status: string; count: number }[];
+    ticketsByStatus: {
+        status: string;
+        count: number;
+        percentage: number;
+        color: string;
+        badgeClass: string;
+    }[];
+    conversationFlow: {
+        day: string;
+        date: string;
+        incoming: number;
+        conversations: number;
+        resolved: number;
+    }[];
     ticketsByCategory: { category: string; count: number }[];
     agentWorkload: {
+        agentId: string;
         agentName: string;
+        facility: string;
         active: number;
         resolved: number;
         breached: number;
         total: number;
     }[];
-    tickets: TicketItem[];
-    agents: AgentItem[];
+    unassignedTickets: TicketSummaryItem[];
+    agents: {
+        _id: string;
+        name: string;
+        email: string;
+    }[];
 }
 
 function CreateStaffModal({ onCreated }: { onCreated: () => void }) {
     const [open, setOpen] = useState(false);
-    const [form, setForm] = useState({ name: "", email: "", password: "", role: "agent", facility: "IT Helpdesk" });
+    const [form, setForm] = useState({
+        name: "",
+        email: "",
+        password: "",
+        role: "agent",
+        facility: "Main Medical Center",
+    });
     const [loading, setLoading] = useState(false);
 
     async function handleSubmit(e: React.FormEvent) {
@@ -82,18 +99,27 @@ function CreateStaffModal({ onCreated }: { onCreated: () => void }) {
         setLoading(true);
         try {
             const res = await fetch("/api/users", {
-                method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form)
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(form),
             });
             const data = await res.json();
-            if (!res.ok) toast.error(data.error || "Failed to create staff");
-            else {
-                toast.success(`${form.role.toUpperCase()} account created!`);
-                setForm({ name: "", email: "", password: "", role: "agent", facility: "IT Helpdesk" });
+            if (!res.ok) {
+                toast.error(data.error || "Failed to create staff account");
+            } else {
+                toast.success(`${form.role.toUpperCase()} account created successfully!`);
+                setForm({
+                    name: "",
+                    email: "",
+                    password: "",
+                    role: "agent",
+                    facility: "Main Medical Center",
+                });
                 setOpen(false);
                 onCreated();
             }
         } catch {
-            toast.error("Network error");
+            toast.error("Network error while creating staff account");
         } finally {
             setLoading(false);
         }
@@ -101,39 +127,79 @@ function CreateStaffModal({ onCreated }: { onCreated: () => void }) {
 
     return (
         <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger className="h-10 px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md cursor-pointer">
+            <DialogTrigger className="h-9 sm:h-10 px-3.5 sm:px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md cursor-pointer">
                 <UserPlus className="h-4 w-4" />
-                Add Staff / Agent
+                <span>Add Agent</span>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
                 <DialogHeader>
-                    <DialogTitle className="text-lg font-bold text-slate-900">Create Staff Account</DialogTitle>
+                    <DialogTitle className="text-lg font-bold text-slate-900">
+                        Add New Support Engineer / Agent
+                    </DialogTitle>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-4 mt-2">
                     <div className="space-y-1.5">
                         <Label className="text-xs font-semibold text-slate-700">Full Name</Label>
-                        <Input required placeholder="Alex System Engineer" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="rounded-xl" />
+                        <Input
+                            required
+                            placeholder="e.g. Dr. Alex Morgan"
+                            value={form.name}
+                            onChange={(e) => setForm({ ...form, name: e.target.value })}
+                            className="rounded-xl text-xs"
+                        />
                     </div>
                     <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-700">Email</Label>
-                        <Input required type="email" placeholder="alex@medops.com" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="rounded-xl" />
+                        <Label className="text-xs font-semibold text-slate-700">Email Address</Label>
+                        <Input
+                            required
+                            type="email"
+                            placeholder="alex.morgan@hospital.org"
+                            value={form.email}
+                            onChange={(e) => setForm({ ...form, email: e.target.value })}
+                            className="rounded-xl text-xs"
+                        />
                     </div>
                     <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-700">Password</Label>
-                        <Input required type="text" placeholder="Initial password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="rounded-xl" />
+                        <Label className="text-xs font-semibold text-slate-700">Initial Password</Label>
+                        <Input
+                            required
+                            type="text"
+                            placeholder="Temporary secure password"
+                            value={form.password}
+                            onChange={(e) => setForm({ ...form, password: e.target.value })}
+                            className="rounded-xl text-xs"
+                        />
                     </div>
-                    <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-700">Role</Label>
-                        <Select value={form.role} onValueChange={(val) => setForm({ ...form, role: val ?? "agent" })}>
-                            <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
-                            <SelectContent className="z-[9999]">
-                                <SelectItem value="agent">Support Agent</SelectItem>
-                                <SelectItem value="admin">System Admin</SelectItem>
-                            </SelectContent>
-                        </Select>
+                    <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-700">Role</Label>
+                            <Select
+                                value={form.role}
+                                onValueChange={(val) => setForm({ ...form, role: val ?? "agent" })}
+                            >
+                                <SelectTrigger className="rounded-xl text-xs"><SelectValue /></SelectTrigger>
+                                <SelectContent className="z-[9999]">
+                                    <SelectItem value="agent">Support Agent</SelectItem>
+                                    <SelectItem value="admin">System Admin</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-slate-700">Facility</Label>
+                            <Input
+                                placeholder="Main Medical Center"
+                                value={form.facility}
+                                onChange={(e) => setForm({ ...form, facility: e.target.value })}
+                                className="rounded-xl text-xs"
+                            />
+                        </div>
                     </div>
-                    <Button type="submit" disabled={loading} className="w-full bg-[#6052E9] hover:bg-[#4F46E5] text-white rounded-xl h-10 font-semibold">
-                        {loading ? "Creating..." : "Create Account"}
+                    <Button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-[#5b4fe9] hover:bg-[#4a3ecc] text-white rounded-xl h-10 font-bold text-xs"
+                    >
+                        {loading ? "Creating Account..." : "Create Staff Account"}
                     </Button>
                 </form>
             </DialogContent>
@@ -141,11 +207,10 @@ function CreateStaffModal({ onCreated }: { onCreated: () => void }) {
     );
 }
 
-export default function AdminDashboardPage() {
+export default function AdminOverviewPage() {
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
     const [data, setData] = useState<AnalyticsData | null>(null);
-    const [categories, setCategories] = useState<CategoryItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [syncing, setSyncing] = useState(false);
     const [assigningTicketId, setAssigningTicketId] = useState<string | null>(null);
@@ -154,22 +219,14 @@ export default function AdminDashboardPage() {
 
     const fetchAnalytics = useCallback(async () => {
         try {
-            const [analyticsRes, catRes] = await Promise.all([
-                fetch("/api/admin/analytics", { cache: "no-store" }),
-                fetch("/api/categories", { cache: "no-store" }),
-            ]);
-
-            if (analyticsRes.ok) {
-                const json = await analyticsRes.json();
+            const res = await fetch("/api/admin/analytics", { cache: "no-store" });
+            if (res.ok) {
+                const json = await res.json();
                 setData(json);
-            }
-            if (catRes.ok) {
-                const catJson = await catRes.json();
-                if (catJson.categories) setCategories(catJson.categories);
             }
         } catch (error) {
             console.error("Admin analytics error:", error);
-            toast.error("Could not load analytics data");
+            toast.error("Could not load command center analytics");
         } finally {
             setLoading(false);
         }
@@ -198,28 +255,6 @@ export default function AdminDashboardPage() {
         }
     }, [sessionStatus, userRole, router, fetchAnalytics]);
 
-    async function handleAssignAgent(ticketId: string, agentId: string) {
-        setAssigningTicketId(ticketId);
-        try {
-            // Correct PATCH endpoint to /api/tickets/[id] with assignedAgent
-            const res = await fetch(`/api/tickets/${ticketId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ assignedAgent: agentId === "UNASSIGNED" ? null : agentId }),
-            });
-            const result = await res.json();
-            if (!res.ok) throw new Error(result.error || "Failed to assign agent");
-
-            toast.success("Task successfully assigned to engineer!");
-            fetchAnalytics();
-        } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : "Assignment failed";
-            toast.error(message);
-        } finally {
-            setAssigningTicketId(null);
-        }
-    }
-
     async function handleManualSlaSync() {
         setSyncing(true);
         try {
@@ -234,32 +269,80 @@ export default function AdminDashboardPage() {
         }
     }
 
+    async function handleAssignEngineer(ticketId: string, agentId: string) {
+        if (!agentId || agentId === "UNASSIGNED") return;
+        setAssigningTicketId(ticketId);
+        try {
+            const res = await fetch(`/api/tickets/${ticketId}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ assignedAgent: agentId }),
+            });
+            const resData = await res.json();
+            if (!res.ok) throw new Error(resData.error || "Failed to assign engineer");
+
+            toast.success("Incident assigned to support engineer!");
+            // Instantly remove ticket from the unassigned list in state
+            setData((prev) => {
+                if (!prev) return prev;
+                return {
+                    ...prev,
+                    unassignedTickets: prev.unassignedTickets.filter((t) => t._id !== ticketId),
+                    summary: {
+                        ...prev.summary,
+                        unassignedCount: Math.max(0, prev.summary.unassignedCount - 1),
+                    },
+                };
+            });
+        } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : "Assignment failed";
+            toast.error(msg);
+        } finally {
+            setAssigningTicketId(null);
+        }
+    }
+
     if (sessionStatus === "loading" || loading) {
         return (
             <div className="min-h-screen bg-[#F4F6FB] flex items-center justify-center text-xs text-slate-500 font-sans">
-                Loading MedOps Admin Command Center...
+                <div className="flex flex-col items-center gap-3">
+                    <div className="w-8 h-8 rounded-full border-2 border-[#5b4fe9] border-t-transparent animate-spin" />
+                    <span>Loading Admin Command Center & Analytics...</span>
+                </div>
             </div>
         );
     }
 
     const summary = data?.summary;
     const totalTickets = summary?.totalTickets ?? 0;
-    const openTickets = summary?.openTicketsCount ?? 0;
-    const slaBreaches = summary?.slaBreachCount ?? 0;
-    const complianceRate = totalTickets > 0 ? Math.round(((totalTickets - slaBreaches) / totalTickets) * 100) : 98;
-    const assignedCount = totalTickets - (summary?.unassignedCount ?? 0);
-    const assignedRate = totalTickets > 0 ? Math.round((assignedCount / totalTickets) * 100) : 85;
+    const openTickets = summary?.openTickets ?? 0;
+    const inProgressTickets = summary?.inProgressTickets ?? 0;
+    const resolvedClosedTickets = summary?.resolvedClosedTickets ?? 0;
+    const complianceRate = summary?.slaComplianceRate ?? 100;
+
+    const priorityBadge = (p: string) => {
+        switch (p) {
+            case "Urgent":
+                return "bg-rose-50 text-rose-700 border-rose-200";
+            case "High":
+                return "bg-orange-50 text-orange-700 border-orange-200";
+            case "Medium":
+                return "bg-sky-50 text-sky-700 border-sky-200";
+            default:
+                return "bg-slate-50 text-slate-700 border-slate-200";
+        }
+    };
 
     return (
         <DashboardShell
-            title="Admin Command & SOC Analytics"
-            subtitle="Hospital IT Security Operations Center • System-wide control, staff dispatch & SLA compliance"
+            title="Overview"
+
             action={
-                <div className="flex items-center gap-2.5 flex-wrap">
+                <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
                     <button
                         onClick={fetchAnalytics}
                         title="Refresh data"
-                        className="h-10 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
+                        className="h-9 sm:h-10 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
                     >
                         <RefreshCw className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Refresh</span>
@@ -268,70 +351,113 @@ export default function AdminDashboardPage() {
                     <button
                         onClick={handleManualSlaSync}
                         disabled={syncing}
-                        className="h-10 px-3.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
+                        className="h-9 sm:h-10 px-3.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
                     >
                         <Zap className="h-3.5 w-3.5 text-[#00D2B4]" />
                         <span className="hidden sm:inline">{syncing ? "Syncing..." : "Run SLA Sync"}</span>
                     </button>
 
-                    <CreateCategoryModal onCreated={fetchAnalytics} />
                     <CreateStaffModal onCreated={fetchAnalytics} />
                 </div>
             }
         >
-            <div className="space-y-6 w-full min-w-0">
-                {/* 1. Overlapping Top Stat Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
+            <div className="space-y-6 w-full min-w-0 max-w-full overflow-x-hidden">
+                {/* 1. 4 Top KPI Cards (Total, Open, In Progress, Resolved & Closed) */}
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-5 w-full min-w-0">
                     <StatCard
-                        label="Total Hospital Incidents"
+                        label="Total Incidents"
                         value={totalTickets}
                         change="+12.5%"
                         isPositive={true}
-                        subtitle="Across all medical clinics"
+                        subtitle="All hospital logged tickets"
                     />
                     <StatCard
-                        label="Open Incident Queue"
+                        label="Open Tickets"
                         value={openTickets}
-                        change="-12.5%"
-                        isPositive={false}
-                        subtitle="Under active triage"
-                    />
-                    <StatCard
-                        label="SLA Breaches"
-                        value={slaBreaches}
-                        change={slaBreaches > 0 ? "ACTION NEEDED" : "COMPLIANT"}
-                        isPositive={slaBreaches === 0}
-                        subtitle="Target: 0 breaches"
-                    />
-                    <StatCard
-                        label="Avg Response Time"
-                        value={`${summary?.avgFirstResponseMinutes ?? 12}m`}
-                        change="+12.5%"
+                        change="-4.2%"
                         isPositive={true}
-                        subtitle="Target < 60 mins"
+                        subtitle="Awaiting triage & engineer"
+                    />
+                    <StatCard
+                        label="In Progress"
+                        value={inProgressTickets}
+                        change="+8.1%"
+                        isPositive={false}
+                        subtitle="Under active investigation"
+                    />
+                    <StatCard
+                        label="Resolved & Closed"
+                        value={resolvedClosedTickets}
+                        change="+19.4%"
+                        isPositive={true}
+                        subtitle="Successfully completed"
                     />
                 </div>
 
-                {/* 2. Middle Row: Status & Category Charts + Target Radial Gauges */}
+                {/* 2. Middle Row: Conversation Flow Timeline & SLA Gauge */}
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full min-w-0">
-                    {/* Left 7 cols: Status Breakdown Chart */}
-                    <div className="lg:col-span-7 bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo flex flex-col justify-between w-full min-w-0 overflow-hidden">
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-sm font-semibold text-slate-800 tracking-tight">
-                                Incidents Distribution by Status
-                            </h3>
-                            <span className="text-xs font-medium text-slate-400">Real-time Overview</span>
+                    {/* Left 8 cols: Conversation & Incident Flow (AreaChart) */}
+                    <div className="lg:col-span-8 bg-white rounded-2xl p-5 sm:p-6 border border-slate-100/90 shadow-baligo flex flex-col justify-between w-full min-w-0 overflow-hidden">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+                            <div>
+                                <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                                    Conversation & Ticket Flow
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    7-day volume of incoming clinical requests, replies & resolutions
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3 text-[11px] font-semibold text-slate-500">
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-[#5b4fe9]" />
+                                    <span>Incoming</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-[#38bdf8]" />
+                                    <span>Conversations</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <span className="w-2.5 h-2.5 rounded-full bg-[#00d084]" />
+                                    <span>Resolved</span>
+                                </div>
+                            </div>
                         </div>
 
-                        <div className="h-60 w-full min-w-0">
+                        <div className="h-64 sm:h-72 w-full min-w-0">
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart
-                                    data={data?.ticketsByStatus || []}
+                                <AreaChart
+                                    data={data?.conversationFlow || []}
                                     margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
                                 >
+                                    <defs>
+                                        <linearGradient id="flowIncoming" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#5b4fe9" stopOpacity={0.25} />
+                                            <stop offset="95%" stopColor="#5b4fe9" stopOpacity={0.0} />
+                                        </linearGradient>
+                                        <linearGradient id="flowConversations" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.25} />
+                                            <stop offset="95%" stopColor="#38bdf8" stopOpacity={0.0} />
+                                        </linearGradient>
+                                        <linearGradient id="flowResolved" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="5%" stopColor="#00d084" stopOpacity={0.25} />
+                                            <stop offset="95%" stopColor="#00d084" stopOpacity={0.0} />
+                                        </linearGradient>
+                                    </defs>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F4F9" />
-                                    <XAxis dataKey="status" fontSize={11} stroke="#94A3B8" axisLine={false} tickLine={false} />
-                                    <YAxis fontSize={11} stroke="#94A3B8" allowDecimals={false} axisLine={false} tickLine={false} />
+                                    <XAxis
+                                        dataKey="day"
+                                        fontSize={11}
+                                        stroke="#94A3B8"
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
+                                    <YAxis
+                                        fontSize={11}
+                                        stroke="#94A3B8"
+                                        allowDecimals={false}
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
                                     <Tooltip
                                         contentStyle={{
                                             backgroundColor: "#141738",
@@ -341,242 +467,343 @@ export default function AdminDashboardPage() {
                                             fontSize: "12px",
                                             boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
                                         }}
-                                        cursor={{ fill: "rgba(96, 82, 233, 0.04)" }}
+                                        cursor={{ stroke: "#5b4fe9", strokeWidth: 1, strokeDasharray: "4 4" }}
                                     />
-                                    <Bar dataKey="count" fill="#6052E9" radius={[6, 6, 0, 0]} />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="incoming"
+                                        stroke="#5b4fe9"
+                                        strokeWidth={2.5}
+                                        fillOpacity={1}
+                                        fill="url(#flowIncoming)"
+                                        name="Incoming Tickets"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="conversations"
+                                        stroke="#38bdf8"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#flowConversations)"
+                                        name="Message Activity"
+                                    />
+                                    <Area
+                                        type="monotone"
+                                        dataKey="resolved"
+                                        stroke="#00d084"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#flowResolved)"
+                                        name="Resolved Tickets"
+                                    />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </div>
+                    </div>
+
+                    {/* Right 4 cols: SLA Compliance & Target Radial Gauges */}
+                    <div className="lg:col-span-4 flex flex-col gap-4 w-full min-w-0">
+                        <RadialGauge
+                            title="SLA Compliance Rate"
+                            percentage={complianceRate}
+                            strokeColor="#00D084"
+                            legendLabel="On-Time Resolution"
+                        />
+                        <div className="bg-white rounded-2xl p-5 border border-slate-100 shadow-baligo flex flex-col justify-between">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                                    First Response Speed
+                                </span>
+                                <Badge className="bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px] font-bold">
+                                    FAST
+                                </Badge>
+                            </div>
+                            <div className="flex items-baseline gap-2 mt-2">
+                                <span className="text-3xl font-extrabold text-slate-900 tracking-tight">
+                                    {summary?.avgFirstResponseMinutes ?? 12}
+                                </span>
+                                <span className="text-sm font-semibold text-slate-400">minutes avg</span>
+                            </div>
+                            <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 font-medium">
+                                <span>Target: &lt; 60 mins</span>
+                                <span className="text-emerald-600 font-bold">98% compliant</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* 3. Incidents Distribution by Status & Category Breakdown */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full min-w-0">
+                    {/* Incidents Distribution by Status (7 cols) */}
+                    <div className="lg:col-span-7 bg-white rounded-2xl p-5 sm:p-6 border border-slate-100/90 shadow-baligo flex flex-col justify-between w-full min-w-0 overflow-hidden">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                                    Incidents Distribution by Status
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">Real-time status breakdown across the helpdesk</p>
+                            </div>
+                            <Badge variant="outline" className="text-xs font-mono rounded-lg">
+                                {totalTickets} Total
+                            </Badge>
+                        </div>
+
+                        <div className="h-56 sm:h-64 w-full min-w-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                    data={data?.ticketsByStatus || []}
+                                    margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F4F9" />
+                                    <XAxis
+                                        dataKey="status"
+                                        fontSize={11}
+                                        stroke="#94A3B8"
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
+                                    <YAxis
+                                        fontSize={11}
+                                        stroke="#94A3B8"
+                                        allowDecimals={false}
+                                        axisLine={false}
+                                        tickLine={false}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: "#141738",
+                                            borderRadius: "12px",
+                                            border: "none",
+                                            color: "#FFFFFF",
+                                            fontSize: "12px",
+                                            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2)",
+                                        }}
+                                        cursor={{ fill: "rgba(91, 79, 233, 0.05)" }}
+                                    />
+                                    <Bar dataKey="count" fill="#5b4fe9" radius={[6, 6, 0, 0]} />
                                 </BarChart>
                             </ResponsiveContainer>
                         </div>
 
-                        <div className="flex items-center justify-center gap-6 mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">
-                            <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-xs bg-[#6052E9]" />
-                                <span>Active Incident Volume</span>
-                            </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mt-4 pt-3 border-t border-slate-100">
+                            {data?.ticketsByStatus?.map((st) => (
+                                <div key={st.status} className="flex flex-col text-center p-2 rounded-xl bg-slate-50/80">
+                                    <span className="text-[10px] font-bold text-slate-400 uppercase truncate">
+                                        {st.status}
+                                    </span>
+                                    <span className="text-sm font-extrabold text-slate-800 mt-0.5">
+                                        {st.count}
+                                    </span>
+                                    <span className="text-[10px] text-slate-400 font-medium">
+                                        {st.percentage}%
+                                    </span>
+                                </div>
+                            ))}
                         </div>
                     </div>
 
-                    {/* Right 5 cols: Two Radial Progress Gauges */}
-                    <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4 w-full min-w-0">
-                        <RadialGauge
-                            title="Hospital SLA Compliance"
-                            percentage={complianceRate}
-                            strokeColor="#00C975"
-                            legendLabel="Compliance Met"
-                        />
-                        <RadialGauge
-                            title="Engineer Assignment"
-                            percentage={assignedRate}
-                            strokeColor="#3B82F6"
-                            legendLabel="Assigned Tickets"
-                        />
+                    {/* Incidents by Clinical Category (5 cols) */}
+                    <div className="lg:col-span-5 bg-white rounded-2xl p-5 sm:p-6 border border-slate-100/90 shadow-baligo flex flex-col justify-between w-full min-w-0 overflow-hidden">
+                        <div className="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                                    Clinical Categories
+                                </h3>
+                                <p className="text-xs text-slate-400 mt-0.5">Incidents categorized by medical domain</p>
+                            </div>
+                            <Layers className="h-4 w-4 text-slate-400" />
+                        </div>
+
+                        <div className="h-56 sm:h-64 w-full min-w-0">
+                            <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                    layout="vertical"
+                                    data={data?.ticketsByCategory || []}
+                                    margin={{ top: 5, right: 20, left: 20, bottom: 5 }}
+                                >
+                                    <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#F1F4F9" />
+                                    <XAxis type="number" fontSize={11} stroke="#94A3B8" axisLine={false} tickLine={false} />
+                                    <YAxis
+                                        type="category"
+                                        dataKey="category"
+                                        fontSize={11}
+                                        stroke="#475569"
+                                        axisLine={false}
+                                        tickLine={false}
+                                        width={95}
+                                    />
+                                    <Tooltip
+                                        contentStyle={{
+                                            backgroundColor: "#141738",
+                                            borderRadius: "12px",
+                                            border: "none",
+                                            color: "#FFFFFF",
+                                            fontSize: "12px",
+                                        }}
+                                    />
+                                    <Bar dataKey="count" fill="#00D084" radius={[0, 6, 6, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </div>
+
+                        <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+                            <span>Top Category</span>
+                            <span className="font-bold text-slate-800">
+                                {data?.ticketsByCategory?.[0]?.category || "General Clinical"}
+                            </span>
+                        </div>
                     </div>
                 </div>
 
-                {/* 3. Task Assignment Table */}
-                <div id="assignment" className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
+                {/* 4. UNASSIGNED HOSPITAL INCIDENTS QUEUE (Replacing generic recent list) */}
+                <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-100/90 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         <div>
-                            <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                                Clinical Support Requests & Task Assignment
-                            </h2>
+                            <div className="flex items-center gap-2.5">
+                                <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                                    Unassigned Hospital Incidents
+                                </h3>
+                                {(data?.unassignedTickets?.length ?? 0) > 0 ? (
+                                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                        {data?.unassignedTickets.length} Needs Assignment
+                                    </span>
+                                ) : (
+                                    <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                        All Dispatched
+                                    </span>
+                                )}
+                            </div>
                             <p className="text-xs text-slate-400 mt-0.5">
-                                Assign or reassign pending hospital incident requests to active engineers
+                                Client & staff issues pending assignment to a support engineer
                             </p>
                         </div>
-                        <Badge variant="outline" className="text-xs font-mono rounded-lg px-2.5 py-1 w-fit">
-                            {data?.tickets?.length ?? 0} Total Requests
-                        </Badge>
+                        <Link
+                            href="/admin/tickets"
+                            className="inline-flex items-center gap-1 text-xs font-bold text-[#5b4fe9] hover:underline cursor-pointer"
+                        >
+                            <span>View All in Tickets</span>
+                            <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
                     </div>
 
-                    <div className="overflow-hidden rounded-xl border border-slate-100 w-full min-w-0 max-w-full">
-                        <div className="overflow-x-auto w-full max-w-full">
-                            <table className="w-full text-left border-collapse min-w-[700px]">
+                    <div className="overflow-hidden rounded-xl border border-slate-100 w-full min-w-0">
+                        {data?.unassignedTickets?.length === 0 ? (
+                            <div className="py-12 px-4 text-center">
+                                <div className="flex flex-col items-center justify-center gap-2.5 max-w-md mx-auto">
+                                    <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-100">
+                                        <CheckCircle2 className="h-6 w-6 stroke-[2]" />
+                                    </div>
+                                    <span className="font-bold text-sm text-slate-800">
+                                        All Hospital Incidents Dispatched!
+                                    </span>
+                                    <p className="text-xs text-slate-400 text-center leading-relaxed">
+                                        Every incident reported by clinical staff has been assigned to an engineer. New incoming tickets will appear here automatically for dispatch.
+                                    </p>
+                                </div>
+                            </div>
+                        ) : (
+                            <table className="w-full text-left border-collapse">
                                 <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                                     <tr>
-                                        <th className="py-3 px-4">Title / Issue</th>
-                                        <th className="py-3 px-4">Category</th>
-                                        <th className="py-3 px-4">Status</th>
-                                        <th className="py-3 px-4">Priority</th>
-                                        <th className="py-3 px-4">Assigned Engineer</th>
-                                        <th className="py-3 px-4 text-right">Dispatch / Assign</th>
+                                        <th className="py-3 px-3 sm:px-4">Ticket</th>
+                                        <th className="py-3 px-3 sm:px-4">Incident Name & Issue</th>
+                                        <th className="hidden md:table-cell py-3 px-4">Priority</th>
+                                        <th className="hidden lg:table-cell py-3 px-4">Reported By / Facility</th>
+                                        <th className="py-3 px-3 sm:px-4">Assign Engineer</th>
+                                        <th className="py-3 px-3 sm:px-4 text-right">Action</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-100 text-xs">
-                                    {data?.tickets && data.tickets.length > 0 ? (
-                                        data.tickets.map((ticket) => (
-                                            <tr key={ticket._id} className="hover:bg-slate-50/80 transition-colors">
-                                                <td className="py-3 px-4 font-semibold text-slate-800 max-w-xs truncate">
-                                                    {ticket.title}
-                                                    {ticket.slaBreached && (
-                                                        <span className="ml-2 text-[10px] text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-md font-mono">
-                                                            SLA BREACHED
-                                                        </span>
-                                                    )}
-                                                </td>
-                                                <td className="py-3 px-4 text-slate-600 font-medium">
-                                                    {ticket.category?.name || "General"}
-                                                </td>
-                                                <td className="py-3 px-4">
-                                                    <Badge variant="outline" className="text-[10px] font-medium capitalize rounded-md">
-                                                        {ticket.status}
-                                                    </Badge>
-                                                </td>
-                                                <td className="py-3 px-4">
-                                                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold ${
-                                                        ticket.priority === "Urgent" ? "bg-rose-50 text-rose-700 border border-rose-200" : "bg-slate-100 text-slate-700"
-                                                    }`}>
-                                                        {ticket.priority}
+                                    {data?.unassignedTickets?.map((t) => (
+                                        <tr key={t._id} className="hover:bg-slate-50/60 transition-colors">
+                                            {/* Ticket Number */}
+                                            <td className="py-3.5 px-3 sm:px-4 font-mono font-bold text-slate-900 whitespace-nowrap">
+                                                <Link
+                                                    href={`/tickets/${t._id}`}
+                                                    className="hover:text-[#5b4fe9] transition-colors"
+                                                >
+                                                    {t.ticketNumber}
+                                                </Link>
+                                            </td>
+
+                                            {/* Incident Title */}
+                                            <td className="py-3.5 px-3 sm:px-4">
+                                                <Link
+                                                    href={`/tickets/${t._id}`}
+                                                    className="font-bold text-slate-800 line-clamp-1 max-w-[180px] sm:max-w-xs hover:text-[#5b4fe9] transition-colors block"
+                                                >
+                                                    {t.title}
+                                                </Link>
+                                                <div className="sm:hidden flex items-center gap-1.5 mt-1">
+                                                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${priorityBadge(t.priority)}`}>
+                                                        {t.priority}
                                                     </span>
-                                                </td>
-                                                <td className="py-3 px-4">
-                                                    {ticket.assignedAgent ? (
-                                                        <span className="text-[#6052E9] font-bold">
-                                                            {ticket.assignedAgent.name}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-amber-600 font-medium italic">Unassigned</span>
-                                                    )}
-                                                </td>
-                                                <td className="py-3 px-4 text-right">
-                                                    <Select
-                                                        defaultValue={ticket.assignedAgent?._id || "UNASSIGNED"}
-                                                        onValueChange={(agentId) => {
-                                                            if (agentId) handleAssignAgent(ticket._id, agentId);
-                                                        }}
-                                                        disabled={assigningTicketId === ticket._id}
-                                                    >
-                                                        <SelectTrigger className="h-8 w-44 text-xs rounded-xl border-slate-200 bg-slate-50/60 ml-auto">
-                                                            <SelectValue placeholder="Assign Agent..." />
-                                                        </SelectTrigger>
-                                                        <SelectContent className="z-[9999]">
-                                                            <SelectItem value="UNASSIGNED">-- Unassigned --</SelectItem>
-                                                            {data.agents?.map((agent) => (
-                                                                <SelectItem key={agent._id} value={agent._id} className="text-xs">
-                                                                    {agent.name}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                </td>
-                                            </tr>
-                                        ))
-                                    ) : (
-                                        <tr>
-                                            <td colSpan={6} className="py-8 text-center text-slate-400 italic">
-                                                No support requests found in the system.
-                                            </td>
-                                        </tr>
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 4. Support Engineer Workload Table */}
-                <div id="users" className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
-                    <div className="flex items-center justify-between">
-                        <div>
-                            <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                                Support Engineer Workload & Performance
-                            </h2>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                Active assignments, resolved count, and SLA breach tracking per engineer
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="overflow-hidden rounded-xl border border-slate-100 w-full min-w-0 max-w-full">
-                        <div className="overflow-x-auto w-full max-w-full">
-                            <table className="w-full text-left border-collapse min-w-[500px]">
-                                <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                    <tr>
-                                        <th className="py-3 px-5">Engineer Name</th>
-                                        <th className="py-3 px-5">Active Tickets</th>
-                                        <th className="py-3 px-5">Resolved</th>
-                                        <th className="py-3 px-5">Breached</th>
-                                        <th className="py-3 px-5">Total Handled</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 text-xs">
-                                    {data?.agentWorkload?.map((a, i) => (
-                                        <tr key={i} className="hover:bg-slate-50/80 transition-colors">
-                                            <td className="py-3 px-5 font-semibold text-slate-800 flex items-center gap-2">
-                                                <div className="w-7 h-7 rounded-lg bg-purple-50 text-[#6052E9] font-bold flex items-center justify-center text-[10px]">
-                                                    {a.agentName.slice(0, 2).toUpperCase()}
+                                                    <span className="text-[10px] text-slate-400 font-medium">
+                                                        {t.createdBy?.name || "Staff"}
+                                                    </span>
                                                 </div>
-                                                <span>{a.agentName}</span>
                                             </td>
-                                            <td className="py-3 px-5 font-bold text-[#6052E9]">{a.active}</td>
-                                            <td className="py-3 px-5 font-bold text-emerald-600">{a.resolved}</td>
-                                            <td className="py-3 px-5 font-bold text-rose-600">{a.breached}</td>
-                                            <td className="py-3 px-5 font-bold text-slate-700">{a.total}</td>
+
+                                            {/* Priority (Desktop) */}
+                                            <td className="hidden md:table-cell py-3.5 px-4 whitespace-nowrap">
+                                                <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${priorityBadge(t.priority)}`}>
+                                                    {t.priority}
+                                                </span>
+                                            </td>
+
+                                            {/* Reporter & Facility (Desktop) */}
+                                            <td className="hidden lg:table-cell py-3.5 px-4 text-slate-600">
+                                                <div className="font-semibold text-slate-800 line-clamp-1">
+                                                    {t.createdBy?.name || "Clinic Staff"}
+                                                </div>
+                                                <span className="text-slate-400 text-[10px] block line-clamp-1">
+                                                    {t.createdBy?.facility || "Main Medical Center"}
+                                                </span>
+                                            </td>
+
+                                            {/* Assign Engineer Dropdown */}
+                                            <td className="py-3.5 px-3 sm:px-4 whitespace-nowrap">
+                                                <Select
+                                                    value="UNASSIGNED"
+                                                    onValueChange={(val) => handleAssignEngineer(t._id, val ?? "")}
+                                                    disabled={assigningTicketId === t._id}
+                                                >
+                                                    <SelectTrigger className="h-8 rounded-lg text-xs bg-slate-50 border-slate-200 w-36 sm:w-44 focus:ring-1 focus:ring-[#5b4fe9]">
+                                                        <div className="flex items-center gap-1.5 truncate text-slate-600 font-medium">
+                                                            <UserCheck className="h-3 w-3 text-slate-400 shrink-0" />
+                                                            <span className="truncate">
+                                                                {assigningTicketId === t._id ? "Assigning..." : "Assign Engineer..."}
+                                                            </span>
+                                                        </div>
+                                                    </SelectTrigger>
+                                                    <SelectContent className="z-[9999]">
+                                                        <SelectItem value="UNASSIGNED" disabled>
+                                                            Select Support Engineer
+                                                        </SelectItem>
+                                                        {data?.agents?.map((ag) => (
+                                                            <SelectItem key={ag._id} value={ag._id}>
+                                                                {ag.name}
+                                                            </SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </td>
+
+                                            {/* Action View */}
+                                            <td className="py-3.5 px-3 sm:px-4 text-right whitespace-nowrap">
+                                                <Link
+                                                    href={`/tickets/${t._id}`}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-[#5b4fe9] hover:text-white text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                                                >
+                                                    <span>View</span>
+                                                    <ArrowRight className="h-3 w-3" />
+                                                </Link>
+                                            </td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 5. Clinical Categories & SLA Matrix */}
-                <div id="categories" className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                        <div>
-                            <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                                Clinical Categories & SLA Response Policy
-                            </h2>
-                            <p className="text-xs text-slate-400 mt-0.5">
-                                Managed healthcare IT scopes and their assigned response and resolution windows
-                            </p>
-                        </div>
-                        <CreateCategoryModal onCreated={fetchAnalytics} />
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 w-full min-w-0">
-                        {categories.map((cat) => (
-                            <div key={cat._id} className="p-4 rounded-xl border border-slate-100 bg-[#F8FAFC] flex flex-col justify-between space-y-3">
-                                <div>
-                                    <div className="flex items-center justify-between gap-2">
-                                        <span className="font-bold text-slate-900 text-sm">
-                                            {cat.name}
-                                        </span>
-                                        <Badge
-                                            variant="outline"
-                                            className={`text-[10px] rounded-md ${
-                                                cat.defaultPriority === "Urgent"
-                                                    ? "bg-rose-50 text-rose-700 border-rose-200 font-bold"
-                                                    : cat.defaultPriority === "High"
-                                                    ? "bg-orange-50 text-orange-700 border-orange-200"
-                                                    : "bg-blue-50 text-blue-700 border-blue-200"
-                                            }`}
-                                        >
-                                            {cat.defaultPriority}
-                                        </Badge>
-                                    </div>
-                                    <p className="text-xs text-slate-500 mt-1.5 leading-relaxed line-clamp-2">
-                                        {cat.description}
-                                    </p>
-                                </div>
-
-                                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-600 font-mono">
-                                    <div className="flex items-center gap-1">
-                                        <Clock className="h-3 w-3 text-[#6052E9]" />
-                                        <span>
-                                            {cat.defaultPriority === "Urgent"
-                                                ? "1h Resp / 8h Res"
-                                                : cat.defaultPriority === "High"
-                                                ? "4h Resp / 24h Res"
-                                                : cat.defaultPriority === "Medium"
-                                                ? "8h Resp / 48h Res"
-                                                : "24h Resp / 72h Res"}
-                                        </span>
-                                    </div>
-                                    <span className="text-emerald-600 font-semibold">Active Policy</span>
-                                </div>
-                            </div>
-                        ))}
+                        )}
                     </div>
                 </div>
             </div>

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, use, Suspense } from "react";
 import { useSession } from "next-auth/react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { SLACountdown } from "@/components/sla-countdown";
@@ -29,6 +29,9 @@ import {
     FileText,
     UserCheck,
     PhoneCall,
+    Maximize2,
+    ExternalLink,
+    X,
 } from "lucide-react";
 
 interface Attachment {
@@ -89,9 +92,24 @@ interface AgentOption {
     email: string;
 }
 
-export default function TicketDetailPage() {
-    const params = useParams<{ id: string }>();
-    const id = params?.id;
+interface PageProps {
+    params: Promise<{ id: string }>;
+}
+
+function isImageAttachment(url: string, name?: string): boolean {
+    if (!url) return false;
+    const lowerUrl = url.toLowerCase();
+    const lowerName = (name || "").toLowerCase();
+    const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".bmp"];
+    if (imageExtensions.some((ext) => lowerUrl.endsWith(ext) || lowerName.endsWith(ext))) {
+        return true;
+    }
+    return lowerUrl.includes("/image/upload/") || lowerUrl.startsWith("data:image/");
+}
+
+function TicketDetailContent({ params }: PageProps) {
+    const unwrappedParams = use(params);
+    const id = unwrappedParams?.id;
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
 
@@ -101,6 +119,7 @@ export default function TicketDetailPage() {
     const [agents, setAgents] = useState<AgentOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [selectedPreview, setSelectedPreview] = useState<Attachment | null>(null);
 
     const [replyBody, setReplyBody] = useState("");
     const [isInternal, setIsInternal] = useState(false);
@@ -333,23 +352,64 @@ export default function TicketDetailPage() {
                             </div>
 
                             {ticket.attachments && ticket.attachments.length > 0 && (
-                                <div className="space-y-1.5 pt-2">
-                                    <div className="text-xs font-semibold text-slate-400">
-                                        Attached Files:
+                                <div className="space-y-3 pt-3 border-t border-slate-100">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
+                                            <Paperclip className="h-3.5 w-3.5 text-[#5b4fe9]" />
+                                            <span>Incident Attachments ({ticket.attachments.length}/3)</span>
+                                        </div>
+                                        <span className="text-[11px] text-slate-400">
+                                            Click any image to preview
+                                        </span>
                                     </div>
-                                    <div className="flex flex-wrap gap-2">
-                                        {ticket.attachments.map((att, i) => (
-                                            <a
-                                                key={i}
-                                                href={att.url}
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-mono text-[#6052E9]"
-                                            >
-                                                <FileText className="h-3.5 w-3.5" />
-                                                {att.name}
-                                            </a>
-                                        ))}
+
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                        {ticket.attachments.map((att, i) => {
+                                            const isImg = isImageAttachment(att.url, att.name);
+                                            return (
+                                                <div
+                                                    key={i}
+                                                    onClick={() => setSelectedPreview(att)}
+                                                    className="group relative rounded-2xl border border-slate-200/80 bg-white overflow-hidden shadow-xs hover:shadow-md hover:border-[#5b4fe9]/50 transition-all cursor-pointer flex flex-col"
+                                                >
+                                                    {isImg ? (
+                                                        <div className="relative aspect-video sm:aspect-[4/3] w-full bg-slate-900 overflow-hidden">
+                                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                            <img
+                                                                src={att.url}
+                                                                alt={att.name}
+                                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                                            />
+                                                            <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                                <span className="px-2.5 py-1 rounded-lg bg-white/95 text-slate-900 text-xs font-bold flex items-center gap-1 shadow-md">
+                                                                    <Maximize2 className="h-3.5 w-3.5 text-[#5b4fe9]" />
+                                                                    View
+                                                                </span>
+                                                            </div>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="aspect-video w-full bg-slate-50 flex items-center justify-center text-slate-400">
+                                                            <FileText className="h-8 w-8 text-slate-400" />
+                                                        </div>
+                                                    )}
+                                                    <div className="p-2.5 bg-white flex items-center justify-between gap-2 border-t border-slate-100">
+                                                        <span className="text-xs font-medium text-slate-700 truncate" title={att.name}>
+                                                            {att.name}
+                                                        </span>
+                                                        <a
+                                                            href={att.url}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            onClick={(e) => e.stopPropagation()}
+                                                            title="Open in new tab"
+                                                            className="text-slate-400 hover:text-[#5b4fe9] p-1 rounded-md hover:bg-slate-50 transition"
+                                                        >
+                                                            <ExternalLink className="h-3.5 w-3.5" />
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 </div>
                             )}
@@ -421,19 +481,39 @@ export default function TicketDetailPage() {
                                         </p>
 
                                         {m.attachments && m.attachments.length > 0 && (
-                                            <div className="flex flex-wrap gap-2 pt-2">
-                                                {m.attachments.map((att, idx) => (
-                                                    <a
-                                                        key={idx}
-                                                        href={att.url}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-xs font-mono text-[#6052E9]"
-                                                    >
-                                                        <Paperclip className="h-3 w-3" />
-                                                        {att.name}
-                                                    </a>
-                                                ))}
+                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2">
+                                                {m.attachments.map((att, idx) => {
+                                                    const isImg = isImageAttachment(att.url, att.name);
+                                                    return (
+                                                        <div
+                                                            key={idx}
+                                                            onClick={() => setSelectedPreview(att)}
+                                                            className="group relative rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs hover:border-[#5b4fe9] transition cursor-pointer"
+                                                        >
+                                                            {isImg ? (
+                                                                <div className="relative aspect-video w-full bg-slate-900 overflow-hidden">
+                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                                                    <img
+                                                                        src={att.url}
+                                                                        alt={att.name}
+                                                                        className="w-full h-full object-cover group-hover:scale-105 transition"
+                                                                    />
+                                                                    <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                                                                        <Maximize2 className="h-4 w-4 text-white" />
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="p-2 flex items-center gap-1.5 text-xs text-slate-600">
+                                                                    <FileText className="h-4 w-4 text-slate-400 shrink-0" />
+                                                                    <span className="truncate">{att.name}</span>
+                                                                </div>
+                                                            )}
+                                                            <div className="p-1.5 bg-slate-50/80 text-[10px] text-slate-600 truncate border-t border-slate-100">
+                                                                {att.name}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
                                         )}
                                     </div>
@@ -788,6 +868,85 @@ export default function TicketDetailPage() {
                     </div>
                 </div>
             )}
+
+            {/* Fullscreen Responsive Image Lightbox Modal */}
+            {selectedPreview && (
+                <div
+                    className="fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 transition-all"
+                    onClick={() => setSelectedPreview(null)}
+                >
+                    <div
+                        className="relative bg-[#141738] rounded-2xl border border-white/10 shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden text-white"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-3.5 sm:p-4 border-b border-white/10 bg-white/5">
+                            <div className="flex items-center gap-2 min-w-0 pr-3">
+                                <FileText className="h-4 w-4 text-[#00D2B4] shrink-0" />
+                                <span className="text-xs sm:text-sm font-bold truncate">
+                                    {selectedPreview.name}
+                                </span>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                <a
+                                    href={selectedPreview.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="h-8 px-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition"
+                                >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                    <span className="hidden sm:inline">Open Original</span>
+                                </a>
+                                <button
+                                    onClick={() => setSelectedPreview(null)}
+                                    className="h-8 w-8 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Image Body */}
+                        <div className="flex-1 p-2 sm:p-4 flex items-center justify-center bg-slate-950/50 overflow-auto">
+                            {isImageAttachment(selectedPreview.url, selectedPreview.name) ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                    src={selectedPreview.url}
+                                    alt={selectedPreview.name}
+                                    className="max-w-full max-h-[75vh] w-auto h-auto object-contain rounded-lg shadow-lg select-none"
+                                />
+                            ) : (
+                                <div className="p-10 text-center text-slate-400 space-y-3">
+                                    <FileText className="h-14 w-14 mx-auto text-slate-400" />
+                                    <p className="text-sm">This file is not an image.</p>
+                                    <a
+                                        href={selectedPreview.url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5b4fe9] text-white text-xs font-bold"
+                                    >
+                                        Download File
+                                    </a>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </DashboardShell>
+    );
+}
+
+export default function TicketDetailPage({ params }: PageProps) {
+    return (
+        <Suspense
+            fallback={
+                <div className="min-h-screen bg-[#F4F6FB] p-4 sm:p-8">
+                    <TicketDetailSkeleton />
+                </div>
+            }
+        >
+            <TicketDetailContent params={params} />
+        </Suspense>
     );
 }
