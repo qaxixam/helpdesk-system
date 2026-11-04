@@ -7,11 +7,12 @@ import { User } from "@/models/User";
 import { maybeSyncLifecycle } from "@/lib/ticket-lifecycle";
 import { PRIORITIES, STATUSES } from "@/lib/validations";
 import { jsonError } from "@/lib/http";
+import type { TicketStatus } from "@/lib/sla";
 
 export const dynamic = "force-dynamic";
 
 const TREND_DAYS = 14;
-const ACTIVE = ["Open", "In Progress", "Waiting on User"];
+const ACTIVE: TicketStatus[] = ["Open", "In Progress", "Waiting on User"];
 
 type Row = { _id: unknown; count: number };
 

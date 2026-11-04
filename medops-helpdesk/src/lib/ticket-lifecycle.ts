@@ -2,10 +2,10 @@ import { Ticket } from "@/models/Ticket";
 import { ActivityLog } from "@/models/ActivityLog";
 import { User } from "@/models/User";
 import { connectDB } from "@/lib/db";
-import { AUTO_CLOSE_DAYS } from "@/lib/sla";
+import { AUTO_CLOSE_DAYS, type TicketStatus } from "@/lib/sla";
 import { sendTicketEmail } from "@/lib/mail";
 
-const ACTIVE_STATUSES = ["Open", "In Progress", "Waiting on User"];
+const ACTIVE_STATUSES: TicketStatus[] = ["Open", "In Progress", "Waiting on User"];
 
 /**
  * 1) SLA breach marking — response ya resolution deadline guzar gayi ho to `slaBreached = true`
