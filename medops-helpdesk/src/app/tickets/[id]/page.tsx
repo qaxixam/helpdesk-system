@@ -48,8 +48,9 @@ function AttachmentList({ items }: { items: Attachment[] }) {
   );
 }
 
-function Message({ m }: { m: MessageRow }) {
+function Message({ m, currentUserId }: { m: MessageRow; currentUserId?: string }) {
   const role = (m.author?.role ?? "user") as Role;
+  const isMe = currentUserId && m.author?._id === currentUserId;
   return (
     <li
       className={cn(
@@ -63,14 +64,14 @@ function Message({ m }: { m: MessageRow }) {
     >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <Avatar name={m.author?.name} size={26} />
-        <span className="text-[13.5px] font-semibold text-ink">{displayName(m.author?.name)}</span>
-        <RoleBadge role={role} />
+        <span className="text-[13.5px] font-semibold text-ink">{isMe ? "You" : displayName(m.author?.name)}</span>
+        <RoleBadge role={role} label={isMe ? "Me" : undefined} />
         {m.isInternal && (
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-warn">
             <Lock className="size-3" /> Internal note · staff only
           </span>
         )}
-        <time className="ml-auto text-[12px] text-ink-4" dateTime={m.createdAt} title={format(new Date(m.createdAt), "PPpp")}>
+        <time className="ml-auto shrink-0 text-[11.5px] text-ink-4 sm:text-[12px]" dateTime={m.createdAt} title={format(new Date(m.createdAt), "PPpp")}>
           {formatDistanceToNowStrict(new Date(m.createdAt), { addSuffix: true })}
         </time>
       </div>
@@ -348,7 +349,7 @@ export default function TicketDetailPage() {
           ) : (
             <ul className="space-y-3">
               {messages.map((m) => (
-                <Message key={m._id} m={m} />
+                <Message key={m._id} m={m} currentUserId={session?.user?.id} />
               ))}
             </ul>
           )}
@@ -387,11 +388,12 @@ export default function TicketDetailPage() {
                 aria-label="Message"
                 className="border-0 px-1 shadow-none focus:ring-0"
               />
-              <div className="mt-2 flex flex-col gap-3 border-t border-line pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-line pt-3">
                 <AttachmentPicker files={files} onChange={setFiles} disabled={sending} />
-                <Button type="submit" loading={sending} disabled={body.trim().length < 2}>
+                <Button type="submit" loading={sending} disabled={body.trim().length < 2} className="shrink-0">
                   {!sending && (internal ? <Lock /> : <Send />)}
-                  {internal ? "Add note" : "Send reply"}
+                  <span className="hidden sm:inline">{internal ? "Add note" : "Send reply"}</span>
+                  <span className="sm:hidden">{internal ? "Note" : "Send"}</span>
                 </Button>
               </div>
             </form>

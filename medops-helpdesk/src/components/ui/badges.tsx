@@ -62,10 +62,11 @@ const roleStyle: Record<Role, string> = {
 };
 const roleLabel: Record<Role, string> = { admin: "Admin", agent: "Agent", user: "Requester" };
 
-export function RoleBadge({ role }: { role: Role }) {
+export function RoleBadge({ role, label }: { role: Role; label?: string }) {
+  const style = label === "Me" ? "bg-teal-600 text-white" : roleStyle[role];
   return (
-    <span className={cn("inline-flex h-5 items-center rounded-sm px-1.5 text-[11.5px] font-semibold", roleStyle[role])}>
-      {roleLabel[role]}
+    <span className={cn("inline-flex h-5 items-center rounded-sm px-1.5 text-[11.5px] font-semibold", style)}>
+      {label ?? roleLabel[role]}
     </span>
   );
 }

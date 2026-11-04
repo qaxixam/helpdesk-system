@@ -1,0 +1,26 @@
+services:
+  app:
+    image: ${IMAGE}
+    restart: unless-stopped
+    env_file: .env
+    expose: ["3000"]
+    mem_limit: 700m
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      - DOMAIN=${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+  cron:
+    image: curlimages/curl:8.10.1
+    restart: unless-stopped
+    env_file: .env
+    entrypoint: ["/bin/sh", "-c", "while true; do sleep 3600; curl -fsS -H \"Authorization: Bearer $$CRON_SECRET\" http://app:3000/api/cron/sla-check || true; done"]
+volumes:
+  caddy_data: {}
+  caddy_config: {}

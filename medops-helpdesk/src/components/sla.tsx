@@ -127,6 +127,64 @@ export function SlaCell({ ticket, now }: { ticket: SlaTicket; now: number }) {
   );
 }
 
+/** Short label for dense rows — matches the "Response targets" panel wording. */
+function shortLabel(label: string) {
+  return label === "First response" ? "Reply" : "Fix";
+}
+
+/**
+ * One-line SLA read-out for dense rows: which clock, how long left.
+ * No bar and no wrapping, so it can sit at the end of a row at any width.
+ */
+export function SlaInline({ ticket, now, className }: { ticket: SlaTicket; now: number; className?: string }) {
+  const sla = readSla(ticket, now);
+
+  if (sla.resolvedish) {
+    return (
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 text-[12.5px] font-medium whitespace-nowrap",
+          sla.breached ? "text-urgent" : "text-ok",
+          className,
+        )}
+      >
+        <span className={cn("size-1.5 rounded-full", sla.breached ? "bg-urgent" : "bg-ok")} aria-hidden />
+        {sla.breached ? "Breached" : "Within SLA"}
+      </span>
+    );
+  }
+
+  const r = sla.current;
+  const state: TargetState = sla.breached && r.state !== "missed" ? "missed" : r.state;
+  const t = tone[state];
+  return (
+    <span
+      className={cn("num inline-flex items-center gap-1.5 text-[12.5px] font-medium whitespace-nowrap", t.text, className)}
+      title={`${r.label} — ${describe(r)}`}
+    >
+      {state === "missed" && <span className="size-1.5 animate-pulse-dot rounded-full bg-urgent" aria-hidden />}
+      <span className="font-normal text-ink-4">{shortLabel(r.label)}</span>
+      {describe(r)}
+    </span>
+  );
+}
+
+/**
+ * How much of the SLA window is spent, as a slim meter. Sits inside a row's
+ * padding — inset and rounded, so it reads as a read-out rather than a rule.
+ */
+export function SlaTraceLine({ ticket, now, className }: { ticket: SlaTicket; now: number; className?: string }) {
+  const sla = readSla(ticket, now);
+  if (sla.resolvedish) return null;
+  const r = sla.current;
+  const t = tone[sla.breached && r.state !== "missed" ? "missed" : r.state];
+  return (
+    <span className={cn("pointer-events-none block h-[3px] overflow-hidden rounded-full bg-line", className)} aria-hidden>
+      <span className={cn("block h-full rounded-full", t.bar)} style={{ width: `${Math.min(100, r.used * 100)}%` }} />
+    </span>
+  );
+}
+
 /** Full SLA trace for the ticket page: two targets on one time axis. */
 export function SlaTrace({ ticket }: { ticket: SlaTicket }) {
   const now = useNow(1000);

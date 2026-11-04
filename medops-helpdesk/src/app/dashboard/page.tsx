@@ -101,8 +101,11 @@ export default function DashboardPage() {
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="min-w-0">
-          <div className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-[15px] font-semibold text-ink">{isAgent ? "Needs attention" : "Your open tickets"}</h2>
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="flex items-baseline gap-2 text-[15px] font-semibold text-ink">
+              {isAgent ? "Needs attention" : "Your open tickets"}
+              {!!s?.active && <span className="num text-[13px] font-normal text-ink-3">{s.active}</span>}
+            </h2>
             <ButtonLink href="/tickets" variant="quiet" size="sm">
               View all
             </ButtonLink>
@@ -113,6 +116,7 @@ export default function DashboardPage() {
               initial={{ scope: "active" }}
               pageSize={6}
               showFilters={false}
+              layout="rows"
               emptyAction={
                 role === "user" ? (
                   <Button onClick={() => setCreating(true)}>
