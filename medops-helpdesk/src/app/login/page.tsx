@@ -30,16 +30,33 @@ export default function LoginPage() {
     }
 
     setLoading(true);
-    const res = await signIn("credentials", { email, password, redirect: false });
+    let res;
+    try {
+      res = await signIn("credentials", { email, password, redirect: false });
+    } catch {
+      toast.error("Could not reach the sign-in service. Please try again.");
+      setLoading(false);
+      return;
+    }
     setLoading(false);
 
-    if (res?.error) {
+    if (!res || res.error) {
       toast.error("Invalid corporate credentials.");
       return;
     }
 
     toast.success("Authenticated successfully");
-    router.push("/");
+    const requestedDestination = new URLSearchParams(window.location.search).get("callbackUrl") || "/";
+    let destination = "/";
+    try {
+      const destinationUrl = new URL(requestedDestination, window.location.origin);
+      if (destinationUrl.origin === window.location.origin) {
+        destination = `${destinationUrl.pathname}${destinationUrl.search}${destinationUrl.hash}`;
+      }
+    } catch {
+      // Ignore malformed or external return URLs and use the role-aware home route.
+    }
+    router.replace(destination);
     router.refresh();
   }
 

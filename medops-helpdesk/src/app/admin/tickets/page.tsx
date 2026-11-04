@@ -80,10 +80,10 @@ export default function AdminTicketsPage() {
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
-            router.push("/login");
+            router.replace("/login");
         }
         if (sessionStatus === "authenticated" && session?.user?.role !== "admin") {
-            router.push("/dashboard");
+            router.replace("/dashboard");
         }
     }, [sessionStatus, session?.user?.role, router]);
 

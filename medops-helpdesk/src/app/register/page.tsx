@@ -49,7 +49,7 @@ export default function RegisterPage() {
         }
 
         toast.success("Account created successfully. Please sign in.");
-        router.push("/login");
+        router.replace("/login");
     }
 
     return (

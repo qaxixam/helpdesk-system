@@ -33,4 +33,6 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
+For production authentication, set `AUTH_SECRET` in Vercel and leave `AUTH_URL` and `NEXTAUTH_URL` unset. Auth.js will use the incoming Vercel host. A localhost URL is only for local development and can send production redirects to `localhost:3000`.
+
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.

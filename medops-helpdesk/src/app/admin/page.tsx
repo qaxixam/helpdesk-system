@@ -236,13 +236,13 @@ export default function AdminOverviewPage() {
         if (sessionStatus === "loading") return;
 
         if (sessionStatus === "unauthenticated") {
-            router.push("/login");
+            router.replace("/login");
             return;
         }
 
         if (sessionStatus === "authenticated") {
             if (userRole !== "admin") {
-                router.push("/dashboard");
+                router.replace("/dashboard");
                 return;
             }
 

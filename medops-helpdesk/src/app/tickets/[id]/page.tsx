@@ -164,7 +164,7 @@ function TicketDetailContent({ params }: PageProps) {
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
-            router.push("/login");
+            router.replace("/login");
         }
     }, [sessionStatus, router]);
 

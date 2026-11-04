@@ -78,7 +78,7 @@ export default function MyTicketsPage() {
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
-            router.push("/login");
+            router.replace("/login");
         } else if (sessionStatus === "authenticated" && role === "admin") {
             router.replace("/admin/tickets");
         }

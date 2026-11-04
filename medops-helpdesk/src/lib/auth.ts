@@ -7,7 +7,23 @@ import { User, UserRole } from "@/models/User";
 import { loginSchema } from "@/lib/validations";
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  trustHost: true,
   session: { strategy: "jwt" },
+  // Keep Auth.js and the route guard on the same cookie name even if a stale
+  // NEXTAUTH_URL setting points at localhost on the deployed environment.
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === "production"
+        ? "__Secure-authjs.session-token"
+        : "authjs.session-token",
+      options: {
+        httpOnly: true,
+        sameSite: "lax",
+        path: "/",
+        secure: process.env.NODE_ENV === "production",
+      },
+    },
+  },
   pages: {
     signIn: "/login",
   },

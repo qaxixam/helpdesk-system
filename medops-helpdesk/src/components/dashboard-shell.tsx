@@ -4,6 +4,8 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   LayoutGrid,
   BarChart3,
@@ -44,6 +46,7 @@ export function DashboardShell({
 }: DashboardShellProps) {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const queryClient = useQueryClient();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const user = session?.user;
@@ -128,6 +131,16 @@ export function DashboardShell({
 
   const navItems = role === "admin" ? adminNav : role === "agent" ? agentNav : userNav;
   const secondaryItems = secondaryNav[role as keyof typeof secondaryNav] || [];
+
+  async function handleSignOut() {
+    try {
+      await signOut({ redirect: false, callbackUrl: `${window.location.origin}/login` });
+      queryClient.clear();
+      window.location.replace("/login");
+    } catch {
+      toast.error("Could not sign out. Please try again.");
+    }
+  }
 
   const roleMeta = {
     admin: {
@@ -292,7 +305,7 @@ export function DashboardShell({
               </div>
 
               <button
-                onClick={() => signOut({ callbackUrl: "/login" })}
+                onClick={handleSignOut}
                 title="Sign out of system"
                 className="text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors shrink-0 cursor-pointer"
               >
