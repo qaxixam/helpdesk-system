@@ -7,6 +7,13 @@ import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
 import { ActivitySkeleton } from "@/components/ui/skeleton";
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
     Activity,
     PlusCircle,
     MessageSquare,
@@ -16,7 +23,9 @@ import {
     Clock,
     AlertCircle,
     ArrowUpRight,
-    Filter,
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react";
 
 interface ActivityItem {
@@ -47,7 +56,17 @@ export default function ActivityPage() {
     const [activities, setActivities] = useState<ActivityItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [filter, setFilter] = useState<"ALL" | "CREATION" | "REPLIES" | "STATUS">("ALL");
+    const [filter, setFilter] = useState<
+        "ALL" | "TICKET_CREATED" | "REPLY_POSTED" | "STATUS_CHANGED" | "ASSIGNED"
+    >("ALL");
+    const [dateRange, setDateRange] = useState<"all" | "today" | "7d" | "30d">("all");
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState({
+        page: 1,
+        limit: 12,
+        totalCount: 0,
+        totalPages: 1,
+    });
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
@@ -59,25 +78,40 @@ export default function ActivityPage() {
         try {
             setLoading(true);
             setError("");
-            const res = await fetch("/api/activity");
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: "12",
+                dateRange,
+            });
+            if (filter !== "ALL") params.set("action", filter);
+
+            const res = await fetch(`/api/activity?${params.toString()}`);
             const data = await res.json();
             if (!res.ok) {
                 setError(data.error || "Failed to load activity stream");
             } else {
                 setActivities(data.activities || []);
+                setPagination(data.pagination || { page: 1, limit: 12, totalCount: 0, totalPages: 1 });
             }
         } catch {
             setError("Network error while loading activities. Click Refresh to retry.");
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [page, filter, dateRange]);
 
     useEffect(() => {
         if (sessionStatus !== "authenticated") return;
         const controller = new AbortController();
 
-        fetch("/api/activity", { signal: controller.signal })
+        const params = new URLSearchParams({
+            page: String(page),
+            limit: "12",
+            dateRange,
+        });
+        if (filter !== "ALL") params.set("action", filter);
+
+        fetch(`/api/activity?${params.toString()}`, { signal: controller.signal })
             .then(async (res) => {
                 const data = await res.json();
                 if (!res.ok) {
@@ -87,6 +121,7 @@ export default function ActivityPage() {
             })
             .then((data) => {
                 setActivities(data.activities || []);
+                setPagination(data.pagination || { page: 1, limit: 12, totalCount: 0, totalPages: 1 });
                 setError("");
             })
             .catch((err: unknown) => {
@@ -103,18 +138,9 @@ export default function ActivityPage() {
             });
 
         return () => controller.abort();
-    }, [sessionStatus]);
+    }, [sessionStatus, page, filter, dateRange]);
 
     const currentUserId = session?.user?.id;
-
-    // Filter activities (Strictly excluding any staff internal notes)
-    const filteredActivities = activities.filter((item) => {
-        if (item.action === "INTERNAL_NOTE_ADDED") return false;
-        if (filter === "CREATION") return item.action === "TICKET_CREATED";
-        if (filter === "REPLIES") return item.action === "REPLY_POSTED";
-        if (filter === "STATUS") return item.action === "STATUS_CHANGED" || item.action === "ASSIGNED" || item.action === "PRIORITY_CHANGED";
-        return true;
-    });
 
     const getActionMeta = (action: string) => {
         switch (action) {
@@ -178,62 +204,111 @@ export default function ActivityPage() {
         >
             <div className="space-y-6 w-full min-w-0">
                 {/* Activity Feed Container */}
-                <div className="bg-white rounded-2xl p-3.5 sm:p-6 border border-slate-100 shadow-baligo space-y-4 sm:space-y-5 w-full min-w-0 overflow-hidden">
-                    {/* Header & Filter Pills */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-4">
+                <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 sm:space-y-5 w-full min-w-0 overflow-hidden">
+                    {/* Header, Filter Pills & Date Filter */}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-4">
                         <div className="flex items-center gap-2">
                             <Activity className="h-4 w-4 text-[#6052E9]" />
                             <h2 className="text-base font-bold text-slate-900 tracking-tight">
                                 Timeline of Events
                             </h2>
-                            <span className="text-xs bg-slate-100 text-slate-600 font-bold px-2 py-0.5 rounded-full">
-                                {filteredActivities.length} items
+                            <span className="text-xs bg-purple-50 text-[#6052E9] font-bold px-2 py-0.5 rounded-full border border-purple-100">
+                                {pagination.totalCount} items
                             </span>
                         </div>
 
-                        {/* Filter Tabs (Horizontally scrollable on small screens) */}
-                        <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 sm:pb-0 scrollbar-none">
-                            <Filter className="h-3.5 w-3.5 text-slate-400 mr-1 hidden sm:inline" />
-                            <button
-                                onClick={() => setFilter("ALL")}
-                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                                    filter === "ALL"
-                                        ? "bg-[#6052E9] text-white shadow-xs"
-                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                }`}
-                            >
-                                All
-                            </button>
-                            <button
-                                onClick={() => setFilter("CREATION")}
-                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                                    filter === "CREATION"
-                                        ? "bg-[#6052E9] text-white shadow-xs"
-                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                }`}
-                            >
-                                Created
-                            </button>
-                            <button
-                                onClick={() => setFilter("REPLIES")}
-                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                                    filter === "REPLIES"
-                                        ? "bg-[#6052E9] text-white shadow-xs"
-                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                }`}
-                            >
-                                Replies
-                            </button>
-                            <button
-                                onClick={() => setFilter("STATUS")}
-                                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                                    filter === "STATUS"
-                                        ? "bg-[#6052E9] text-white shadow-xs"
-                                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                                }`}
-                            >
-                                Updates
-                            </button>
+                        {/* Filter Tabs and Date Selector */}
+                        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                            {/* Action Filter Pills */}
+                            <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-1 sm:pb-0 scrollbar-none">
+                                <button
+                                    onClick={() => {
+                                        setFilter("ALL");
+                                        setPage(1);
+                                    }}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                        filter === "ALL"
+                                            ? "bg-[#6052E9] text-white shadow-xs"
+                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    }`}
+                                >
+                                    All
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setFilter("TICKET_CREATED");
+                                        setPage(1);
+                                    }}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                        filter === "TICKET_CREATED"
+                                            ? "bg-[#6052E9] text-white shadow-xs"
+                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    }`}
+                                >
+                                    Creations
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setFilter("REPLY_POSTED");
+                                        setPage(1);
+                                    }}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                        filter === "REPLY_POSTED"
+                                            ? "bg-[#6052E9] text-white shadow-xs"
+                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    }`}
+                                >
+                                    Replies
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setFilter("STATUS_CHANGED");
+                                        setPage(1);
+                                    }}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                        filter === "STATUS_CHANGED"
+                                            ? "bg-[#6052E9] text-white shadow-xs"
+                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    }`}
+                                >
+                                    Updates
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setFilter("ASSIGNED");
+                                        setPage(1);
+                                    }}
+                                    className={`px-3 py-1.5 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                        filter === "ASSIGNED"
+                                            ? "bg-[#6052E9] text-white shadow-xs"
+                                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    }`}
+                                >
+                                    Assigned
+                                </button>
+                            </div>
+
+                            {/* Date Filter Dropdown */}
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                <Select
+                                    value={dateRange}
+                                    onValueChange={(val) => {
+                                        setDateRange((val ?? "all") as "all" | "today" | "7d" | "30d");
+                                        setPage(1);
+                                    }}
+                                >
+                                    <SelectTrigger className="h-8 text-xs rounded-xl border-slate-200 bg-slate-50/70 w-[130px] font-medium text-slate-700">
+                                        <Calendar className="h-3.5 w-3.5 mr-1 text-[#6052E9]" />
+                                        <SelectValue placeholder="Date Range" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Time</SelectItem>
+                                        <SelectItem value="today">Today</SelectItem>
+                                        <SelectItem value="7d">Last 7 Days</SelectItem>
+                                        <SelectItem value="30d">Last 30 Days</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
                     </div>
 
@@ -249,7 +324,7 @@ export default function ActivityPage() {
                         <div className="p-4">
                             <ActivitySkeleton count={5} />
                         </div>
-                    ) : filteredActivities.length === 0 ? (
+                    ) : activities.length === 0 ? (
                         <div className="p-12 text-center space-y-2">
                             <CheckCircle2 className="h-8 w-8 text-slate-300 mx-auto" />
                             <div className="text-sm font-semibold text-slate-700">
@@ -261,7 +336,7 @@ export default function ActivityPage() {
                         </div>
                     ) : (
                         <div className="divide-y divide-slate-100">
-                            {filteredActivities.map((item) => {
+                            {activities.map((item) => {
                                 const meta = getActionMeta(item.action);
                                 const Icon = meta.icon;
                                 const isMe = item.actor?._id === currentUserId;
@@ -347,6 +422,34 @@ export default function ActivityPage() {
                                     </div>
                                 );
                             })}
+                        </div>
+                    )}
+
+                    {/* Pagination Controls */}
+                    {pagination.totalPages > 1 && (
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs text-slate-500">
+                            <div>
+                                Page <strong className="text-slate-800">{pagination.page}</strong> of{" "}
+                                <strong className="text-slate-800">{pagination.totalPages}</strong> ({pagination.totalCount} total)
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                                <button
+                                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                    disabled={pagination.page <= 1}
+                                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                                    title="Previous Page"
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                </button>
+                                <button
+                                    onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                                    disabled={pagination.page >= pagination.totalPages}
+                                    className="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-30 disabled:pointer-events-none cursor-pointer"
+                                    title="Next Page"
+                                >
+                                    <ChevronRight className="h-4 w-4" />
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>

@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { ActivityLog } from "@/models/ActivityLog";
 import { Ticket } from "@/models/Ticket";
 import { User } from "@/models/User";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
     const { user, errorResponse } = await requireAuth();
     if (errorResponse || !user) return errorResponse!;
 
@@ -14,6 +14,12 @@ export async function GET() {
         // Ensure models are registered for populate
         void User;
         void Ticket;
+
+        const { searchParams } = new URL(req.url);
+        const page = Math.max(1, Number(searchParams.get("page")) || 1);
+        const limit = Math.min(50, Math.max(1, Number(searchParams.get("limit")) || 12));
+        const action = searchParams.get("action");
+        const dateRange = searchParams.get("dateRange") || "all";
 
         let query: Record<string, unknown> = {};
 
@@ -33,34 +39,43 @@ export async function GET() {
         }
         // Admin sees all activities across the entire system
 
-        const activities = await ActivityLog.find(query)
-            .sort({ createdAt: -1 })
-            .limit(100)
-            .populate("ticket", "ticketNumber title priority status")
-            .populate("actor", "name email role facility")
-            .lean();
+        if (action && action !== "ALL") {
+            query.action = action;
+        }
 
-        // Calculate summary metrics
-        const totalCount = activities.length;
-        const ticketCreations = activities.filter((a) => a.action === "TICKET_CREATED").length;
-        const replies = activities.filter((a) => a.action === "REPLY_POSTED").length;
-        const statusChanges = activities.filter((a) => a.action === "STATUS_CHANGED").length;
-        const assignments = activities.filter((a) => a.action === "ASSIGNED").length;
+        // Date range filtering
+        const now = new Date();
+        if (dateRange === "today") {
+            const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            query.createdAt = { $gte: startOfToday };
+        } else if (dateRange === "7d") {
+            const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            query.createdAt = { $gte: sevenDaysAgo };
+        } else if (dateRange === "30d") {
+            const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            query.createdAt = { $gte: thirtyDaysAgo };
+        }
+
+        const skip = (page - 1) * limit;
+
+        const [activities, totalCount] = await Promise.all([
+            ActivityLog.find(query)
+                .sort({ createdAt: -1 })
+                .skip(skip)
+                .limit(limit)
+                .populate("ticket", "ticketNumber title priority status")
+                .populate("actor", "name email role facility")
+                .lean(),
+            ActivityLog.countDocuments(query),
+        ]);
 
         return NextResponse.json({
             activities,
-            metrics: {
+            pagination: {
+                page,
+                limit,
                 totalCount,
-                ticketCreations,
-                replies,
-                statusChanges,
-                assignments,
-                myCreations: activities.filter(
-                    (a) => a.action === "TICKET_CREATED" && String((a.actor as unknown as { _id?: unknown })?._id || a.actor) === user.id
-                ).length,
-                myReplies: activities.filter(
-                    (a) => a.action === "REPLY_POSTED" && String((a.actor as unknown as { _id?: unknown })?._id || a.actor) === user.id
-                ).length,
+                totalPages: Math.max(1, Math.ceil(totalCount / limit)),
             },
         });
     } catch (error) {

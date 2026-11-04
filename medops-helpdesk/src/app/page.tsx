@@ -1,9 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 
-// 🚀 FIX: Next.js 16 ke naye 'cacheComponents' ke mutabiq dynamic route ko handle karna
-export const instant = false;
-
 export default async function HomePage() {
   // Auth check (yeh automatically headers/cookies read karta hai)
   const session = await auth();

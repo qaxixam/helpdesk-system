@@ -434,43 +434,42 @@ export default function AdminTeamPage() {
                     </div>
                 )}
 
-                {/* Team Roster Table */}
+                {/* Team Roster Container (Desktop Table + Mobile Cards) */}
                 <div className="bg-white rounded-2xl border border-slate-100 shadow-baligo overflow-hidden w-full min-w-0">
                     {loading ? (
                         <div className="p-6">
                             <TableSkeleton rows={6} />
                         </div>
+                    ) : filteredMembers.length === 0 ? (
+                        <div className="py-12 px-4 text-center text-slate-400">
+                            No team members match your filter.
+                        </div>
                     ) : (
-                        <div className="overflow-hidden w-full min-w-0">
-                            <table className="w-full text-left border-collapse">
-                                <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                    <tr>
-                                        <th className="py-3 px-3 sm:px-4">Member Name</th>
-                                        <th className="py-3 px-3 sm:px-4">Role</th>
-                                        <th className="hidden md:table-cell py-3 px-4">Facility</th>
-                                        <th className="hidden lg:table-cell py-3 px-4">Assigned Workload</th>
-                                        <th className="py-3 px-3 sm:px-4 text-center">Status</th>
-                                        <th className="py-3 px-3 sm:px-4 text-right">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-slate-100 text-xs">
-                                    {filteredMembers.length === 0 ? (
+                        <>
+                            {/* 1. DESKTOP & TABLET VIEW (md and above) */}
+                            <div className="hidden md:block overflow-x-auto w-full">
+                                <table className="w-full text-left border-collapse">
+                                    <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                                         <tr>
-                                            <td colSpan={6} className="py-12 text-center text-slate-400">
-                                                No team members match your filter.
-                                            </td>
+                                            <th className="py-3 px-4">Member Name</th>
+                                            <th className="py-3 px-4">Role</th>
+                                            <th className="py-3 px-4">Facility / Clinic</th>
+                                            <th className="py-3 px-4">Assigned Workload</th>
+                                            <th className="py-3 px-4 text-center">Status</th>
+                                            <th className="py-3 px-4 text-right">Actions</th>
                                         </tr>
-                                    ) : (
-                                        filteredMembers.map((m) => {
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100 text-xs">
+                                        {filteredMembers.map((m) => {
                                             const workload = workloads[m._id];
                                             const isSelf = m._id === session?.user?.id;
 
                                             return (
                                                 <tr key={m._id} className="hover:bg-slate-50/60 transition-colors">
                                                     {/* Member & Email */}
-                                                    <td className="py-3.5 px-3 sm:px-4">
+                                                    <td className="py-3.5 px-4">
                                                         <div className="flex items-center gap-2.5">
-                                                            <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 font-bold flex items-center justify-center text-xs shrink-0 border border-slate-200">
+                                                            <div className="w-8 h-8 rounded-full bg-[#5b4fe9]/10 text-[#5b4fe9] font-bold flex items-center justify-center text-xs shrink-0 border border-[#5b4fe9]/20">
                                                                 {m.name.charAt(0).toUpperCase()}
                                                             </div>
                                                             <div className="min-w-0">
@@ -490,19 +489,19 @@ export default function AdminTeamPage() {
                                                     </td>
 
                                                     {/* Role */}
-                                                    <td className="py-3.5 px-3 sm:px-4 whitespace-nowrap">
+                                                    <td className="py-3.5 px-4 whitespace-nowrap">
                                                         {roleBadge(m.role)}
                                                     </td>
 
-                                                    {/* Facility (Desktop) */}
-                                                    <td className="hidden md:table-cell py-3.5 px-4 text-slate-600">
+                                                    {/* Facility */}
+                                                    <td className="py-3.5 px-4 text-slate-600 font-medium">
                                                         {m.facility || "Main Medical Center"}
                                                     </td>
 
-                                                    {/* Workload Stats (Desktop) */}
-                                                    <td className="hidden lg:table-cell py-3.5 px-4">
+                                                    {/* Workload Stats */}
+                                                    <td className="py-3.5 px-4 whitespace-nowrap">
                                                         {m.role === "agent" && workload ? (
-                                                            <div className="flex items-center gap-2 text-[11px]">
+                                                            <div className="flex items-center gap-1.5 text-[11px]">
                                                                 <span className="font-bold text-[#5b4fe9] bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
                                                                     {workload.active} active
                                                                 </span>
@@ -511,23 +510,25 @@ export default function AdminTeamPage() {
                                                                 </span>
                                                             </div>
                                                         ) : (
-                                                            <span className="text-[11px] text-slate-400">—</span>
+                                                            <span className="text-[11px] text-slate-400">
+                                                                {m.role === "admin" ? "Command Staff" : "Client Requester"}
+                                                            </span>
                                                         )}
                                                     </td>
 
                                                     {/* Active / Inactive Status */}
-                                                    <td className="py-3.5 px-3 sm:px-4 text-center whitespace-nowrap">
+                                                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
                                                         <button
                                                             onClick={() => handleToggleStatus(m._id, m.isActive)}
                                                             disabled={updatingId === m._id || isSelf}
                                                             title={isSelf ? "Cannot deactivate yourself" : "Toggle active status"}
-                                                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${isSelf
-                                                                    ? "cursor-not-allowed opacity-80"
-                                                                    : "cursor-pointer hover:opacity-85"
-                                                                } ${m.isActive
+                                                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${
+                                                                isSelf ? "cursor-not-allowed opacity-80" : "cursor-pointer hover:opacity-85"
+                                                            } ${
+                                                                m.isActive
                                                                     ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                                                                     : "bg-slate-100 text-slate-500 border border-slate-200"
-                                                                }`}
+                                                            }`}
                                                         >
                                                             {m.isActive ? (
                                                                 <>
@@ -544,9 +545,9 @@ export default function AdminTeamPage() {
                                                     </td>
 
                                                     {/* Role Adjust Dropdown */}
-                                                    <td className="py-3.5 px-3 sm:px-4 text-right whitespace-nowrap">
+                                                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
                                                         {isSelf ? (
-                                                            <span className="text-[11px] text-slate-400 font-mono">Owner</span>
+                                                            <span className="text-[11px] text-slate-400 font-mono font-bold">Owner</span>
                                                         ) : (
                                                             <Select
                                                                 value={m.role}
@@ -566,11 +567,124 @@ export default function AdminTeamPage() {
                                                     </td>
                                                 </tr>
                                             );
-                                        })
-                                    )}
-                                </tbody>
-                            </table>
-                        </div>
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {/* 2. MOBILE CARD VIEW (< md, phones and small screens) */}
+                            <div className="md:hidden divide-y divide-slate-100">
+                                {filteredMembers.map((m) => {
+                                    const workload = workloads[m._id];
+                                    const isSelf = m._id === session?.user?.id;
+
+                                    return (
+                                        <div key={m._id} className="p-4 space-y-3 hover:bg-slate-50/50 transition-colors">
+                                            {/* Header: Avatar, Name, Email, Role */}
+                                            <div className="flex items-start justify-between gap-2">
+                                                <div className="flex items-center gap-2.5 min-w-0">
+                                                    <div className="w-10 h-10 rounded-full bg-[#5b4fe9]/10 text-[#5b4fe9] font-extrabold flex items-center justify-center text-sm shrink-0 border border-[#5b4fe9]/20">
+                                                        {m.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <div className="font-bold text-slate-900 text-sm truncate flex items-center gap-1.5">
+                                                            <span>{m.name}</span>
+                                                            {isSelf && (
+                                                                <span className="text-[10px] font-bold text-[#5b4fe9]">
+                                                                    (You)
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-xs text-slate-400 truncate">
+                                                            {m.email}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                {roleBadge(m.role)}
+                                            </div>
+
+                                            {/* Details: Facility & Workload */}
+                                            <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
+                                                <div>
+                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                                                        Facility
+                                                    </span>
+                                                    <span className="font-semibold text-slate-700 truncate block mt-0.5">
+                                                        {m.facility || "Main Medical Center"}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
+                                                        Workload
+                                                    </span>
+                                                    {m.role === "agent" && workload ? (
+                                                        <span className="font-bold text-[#5b4fe9] block mt-0.5 truncate">
+                                                            {workload.active} active · {workload.resolved} res
+                                                        </span>
+                                                    ) : (
+                                                        <span className="text-slate-500 font-medium block mt-0.5 truncate">
+                                                            {m.role === "admin" ? "Command Staff" : "Client Requester"}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Controls: Status Toggle & Change Role */}
+                                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50">
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="text-xs text-slate-400 font-medium">Status:</span>
+                                                    <button
+                                                        onClick={() => handleToggleStatus(m._id, m.isActive)}
+                                                        disabled={updatingId === m._id || isSelf}
+                                                        title={isSelf ? "Cannot deactivate yourself" : "Toggle active status"}
+                                                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all ${
+                                                            isSelf ? "cursor-not-allowed opacity-80" : "cursor-pointer hover:opacity-85"
+                                                        } ${
+                                                            m.isActive
+                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                                                : "bg-slate-100 text-slate-500 border border-slate-200"
+                                                        }`}
+                                                    >
+                                                        {m.isActive ? (
+                                                            <>
+                                                                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
+                                                                <span>Active</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <XCircle className="h-3.5 w-3.5 text-slate-400" />
+                                                                <span>Inactive</span>
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5">
+                                                    {isSelf ? (
+                                                        <span className="text-xs text-slate-400 font-mono font-bold">Owner</span>
+                                                    ) : (
+                                                        <Select
+                                                            value={m.role}
+                                                            onValueChange={(val) => handleChangeRole(m._id, val ?? "agent")}
+                                                            disabled={updatingId === m._id}
+                                                        >
+                                                            <SelectTrigger className="h-8 rounded-lg text-xs bg-white border-slate-200 w-28">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent className="z-[9999]">
+                                                                <SelectItem value="agent">Agent</SelectItem>
+                                                                <SelectItem value="admin">Admin</SelectItem>
+                                                                <SelectItem value="user">User</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </>
                     )}
                 </div>
             </div>

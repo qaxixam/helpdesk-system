@@ -140,10 +140,7 @@ export function DashboardShell({
   ];
 
   const secondaryNav = {
-    admin: [
-      { label: "SLA Monitor & Sync", href: "/admin#sla-sync", icon: Activity },
-      { label: "Live System Audit", href: "/dashboard#audit", icon: ShieldCheck },
-    ],
+    admin: [],
     agent: [
       { label: "SLA Matrix & Rules", href: "/dashboard#sla-rules", icon: BookOpen },
       { label: "My Activity Stream", href: "/dashboard#activity", icon: Activity },
@@ -227,14 +224,14 @@ export function DashboardShell({
             </button>
           </div>
 
-          {/* Quick Search & Actions (Admin & Agent only) */}
-          {role !== "user" && (
+          {/* Quick Search (Support Engineer SOC only; removed for Admin & User) */}
+          {role === "agent" && (
             <div className="px-5 pt-5 pb-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
                 <input
                   type="text"
-                  placeholder={role === "admin" ? "Search tickets, staff..." : "Search incidents..."}
+                  placeholder="Search incidents..."
                   value={sidebarSearch}
                   onChange={(e) => setSidebarSearch(e.target.value)}
                   className="w-full bg-white/10 hover:bg-white/15 focus:bg-white/20 text-white placeholder-slate-400 text-xs rounded-xl pl-8 pr-3 py-2 border border-white/5 transition-all outline-none focus:ring-1 focus:ring-purple-400"
@@ -245,6 +242,11 @@ export function DashboardShell({
                   {sidebarAction}
                 </div>
               )}
+            </div>
+          )}
+          {role === "admin" && sidebarAction && (
+            <div className="px-5 pt-5 pb-3">
+              {sidebarAction}
             </div>
           )}
 

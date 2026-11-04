@@ -307,7 +307,7 @@ export default function AdminOverviewPage() {
             <div className="min-h-screen bg-[#F4F6FB] flex items-center justify-center text-xs text-slate-500 font-sans">
                 <div className="flex flex-col items-center gap-3">
                     <div className="w-8 h-8 rounded-full border-2 border-[#5b4fe9] border-t-transparent animate-spin" />
-                    <span>Loading Admin Command Center & Analytics...</span>
+                    <span></span>
                 </div>
             </div>
         );

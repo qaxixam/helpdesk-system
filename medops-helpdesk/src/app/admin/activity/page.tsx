@@ -8,6 +8,13 @@ import { DashboardShell } from "@/components/dashboard-shell";
 import { ActivitySkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from "@/components/ui/select";
+import {
     Activity,
     PlusCircle,
     MessageSquare,
@@ -18,7 +25,9 @@ import {
     ArrowUpRight,
     RefreshCw,
     AlertCircle,
-    Filter,
+    Calendar,
+    ChevronLeft,
+    ChevronRight,
 } from "lucide-react";
 
 interface ActivityItem {
@@ -50,8 +59,16 @@ export default function AdminActivityPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [filter, setFilter] = useState<
-        "ALL" | "CREATION" | "REPLIES" | "STATUS" | "NOTES" | "ASSIGNMENT"
+        "ALL" | "TICKET_CREATED" | "REPLY_POSTED" | "STATUS_CHANGED" | "INTERNAL_NOTE_ADDED" | "ASSIGNED"
     >("ALL");
+    const [dateRange, setDateRange] = useState<"all" | "today" | "7d" | "30d">("all");
+    const [page, setPage] = useState(1);
+    const [pagination, setPagination] = useState({
+        page: 1,
+        limit: 12,
+        totalCount: 0,
+        totalPages: 1,
+    });
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
@@ -66,25 +83,40 @@ export default function AdminActivityPage() {
         try {
             setLoading(true);
             setError("");
-            const res = await fetch("/api/activity");
+            const params = new URLSearchParams({
+                page: String(page),
+                limit: "12",
+                dateRange,
+            });
+            if (filter !== "ALL") params.set("action", filter);
+
+            const res = await fetch(`/api/activity?${params.toString()}`);
             const data = await res.json();
             if (!res.ok) {
                 setError(data.error || "Failed to load activity stream");
             } else {
                 setActivities(data.activities || []);
+                setPagination(data.pagination || { page: 1, limit: 12, totalCount: 0, totalPages: 1 });
             }
         } catch {
             setError("Network error while loading activities. Click Refresh to retry.");
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [page, filter, dateRange]);
 
     useEffect(() => {
         if (sessionStatus !== "authenticated" || session?.user?.role !== "admin") return;
         const controller = new AbortController();
 
-        fetch("/api/activity", { signal: controller.signal })
+        const params = new URLSearchParams({
+            page: String(page),
+            limit: "12",
+            dateRange,
+        });
+        if (filter !== "ALL") params.set("action", filter);
+
+        fetch(`/api/activity?${params.toString()}`, { signal: controller.signal })
             .then(async (res) => {
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.error || "Failed to load activities");
@@ -92,6 +124,7 @@ export default function AdminActivityPage() {
             })
             .then((data) => {
                 setActivities(data.activities || []);
+                setPagination(data.pagination || { page: 1, limit: 12, totalCount: 0, totalPages: 1 });
                 setError("");
             })
             .catch((err: unknown) => {
@@ -106,17 +139,7 @@ export default function AdminActivityPage() {
             });
 
         return () => controller.abort();
-    }, [sessionStatus, session?.user?.role]);
-
-    // Filter activities by action
-    const filteredActivities = activities.filter((item) => {
-        if (filter === "CREATION") return item.action === "TICKET_CREATED";
-        if (filter === "REPLIES") return item.action === "REPLY_POSTED";
-        if (filter === "STATUS") return item.action === "STATUS_CHANGED";
-        if (filter === "NOTES") return item.action === "INTERNAL_NOTE_ADDED";
-        if (filter === "ASSIGNMENT") return item.action === "ASSIGNED";
-        return true;
-    });
+    }, [sessionStatus, session?.user?.role, page, filter, dateRange]);
 
     const getActionBadge = (action: string) => {
         switch (action) {
@@ -179,7 +202,7 @@ export default function AdminActivityPage() {
     return (
         <DashboardShell
             title="System Activity & Audit Trail"
-
+            subtitle="Hospital Security Operations Log • Real-time stream of all user reports, engineer dispatch & status events"
             action={
                 <button
                     onClick={fetchActivities}
@@ -192,68 +215,112 @@ export default function AdminActivityPage() {
             }
         >
             <div className="space-y-5 w-full min-w-0 max-w-full overflow-x-hidden">
-                {/* Filter Band */}
-                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 w-full min-w-0">
-                    <div className="flex items-center gap-2">
-                        <Filter className="h-4 w-4 text-slate-400" />
-                        <span className="text-xs font-bold text-slate-800">Filter Event Type:</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 flex-wrap w-full sm:w-auto">
+                {/* Filter Band with Event Types & Date Filter */}
+                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 w-full min-w-0">
+                    {/* Action Filter Pills */}
+                    <div className="flex items-center gap-1.5 flex-wrap flex-1 min-w-0">
                         <button
-                            onClick={() => setFilter("ALL")}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${filter === "ALL"
+                            onClick={() => {
+                                setFilter("ALL");
+                                setPage(1);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                filter === "ALL"
                                     ? "bg-[#5b4fe9] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-                                }`}
+                            }`}
                         >
-                            All ({activities.length})
+                            All Events
                         </button>
                         <button
-                            onClick={() => setFilter("CREATION")}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${filter === "CREATION"
+                            onClick={() => {
+                                setFilter("TICKET_CREATED");
+                                setPage(1);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                filter === "TICKET_CREATED"
                                     ? "bg-[#5b4fe9] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-                                }`}
+                            }`}
                         >
                             Creations
                         </button>
                         <button
-                            onClick={() => setFilter("REPLIES")}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${filter === "REPLIES"
+                            onClick={() => {
+                                setFilter("REPLY_POSTED");
+                                setPage(1);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                filter === "REPLY_POSTED"
                                     ? "bg-[#5b4fe9] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-                                }`}
+                            }`}
                         >
                             Messages
                         </button>
                         <button
-                            onClick={() => setFilter("STATUS")}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${filter === "STATUS"
+                            onClick={() => {
+                                setFilter("STATUS_CHANGED");
+                                setPage(1);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                filter === "STATUS_CHANGED"
                                     ? "bg-[#5b4fe9] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-                                }`}
+                            }`}
                         >
                             Status
                         </button>
                         <button
-                            onClick={() => setFilter("NOTES")}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${filter === "NOTES"
+                            onClick={() => {
+                                setFilter("INTERNAL_NOTE_ADDED");
+                                setPage(1);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                filter === "INTERNAL_NOTE_ADDED"
                                     ? "bg-[#5b4fe9] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-                                }`}
+                            }`}
                         >
                             Staff Notes
                         </button>
                         <button
-                            onClick={() => setFilter("ASSIGNMENT")}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${filter === "ASSIGNMENT"
+                            onClick={() => {
+                                setFilter("ASSIGNED");
+                                setPage(1);
+                            }}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                                filter === "ASSIGNED"
                                     ? "bg-[#5b4fe9] text-white shadow-xs"
                                     : "bg-slate-100 text-slate-600 hover:bg-slate-200/70"
-                                }`}
+                            }`}
                         >
                             Dispatched
                         </button>
+                    </div>
+
+                    {/* Date Range Selector */}
+                    <div className="flex items-center gap-2 shrink-0">
+                        <Select
+                            value={dateRange}
+                            onValueChange={(val) => {
+                                setDateRange((val ?? "all") as "all" | "today" | "7d" | "30d");
+                                setPage(1);
+                            }}
+                        >
+                            <SelectTrigger className="h-9 sm:h-10 rounded-xl bg-slate-50/70 border-slate-200 text-xs w-full sm:w-40 focus:ring-1 focus:ring-[#5b4fe9]">
+                                <div className="flex items-center gap-1.5">
+                                    <Calendar className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                    <SelectValue placeholder="Date Range" />
+                                </div>
+                            </SelectTrigger>
+                            <SelectContent className="z-[9999]">
+                                <SelectItem value="all">All Time</SelectItem>
+                                <SelectItem value="today">Today</SelectItem>
+                                <SelectItem value="7d">Last 7 Days</SelectItem>
+                                <SelectItem value="30d">Last 30 Days</SelectItem>
+                            </SelectContent>
+                        </Select>
                     </div>
                 </div>
 
@@ -276,10 +343,10 @@ export default function AdminActivityPage() {
                 )}
 
                 {/* Activity Feed Container */}
-                <div className="bg-white rounded-2xl p-5 sm:p-7 border border-slate-100 shadow-baligo w-full min-w-0">
+                <div className="bg-white rounded-2xl p-5 sm:p-7 border border-slate-100 shadow-baligo w-full min-w-0 space-y-6">
                     {loading ? (
                         <ActivitySkeleton />
-                    ) : filteredActivities.length === 0 ? (
+                    ) : activities.length === 0 ? (
                         <div className="py-16 text-center">
                             <div className="flex flex-col items-center justify-center gap-2 text-slate-400">
                                 <Activity className="h-10 w-10 stroke-[1.5]" />
@@ -287,13 +354,13 @@ export default function AdminActivityPage() {
                                     No activity logs found
                                 </span>
                                 <p className="text-xs max-w-sm">
-                                    No recorded events match the selected category filter.
+                                    No recorded events match the selected filter and date range.
                                 </p>
                             </div>
                         </div>
                     ) : (
                         <div className="relative border-l-2 border-slate-100 ml-3 sm:ml-4 space-y-6 sm:space-y-8 pl-4 sm:pl-6">
-                            {filteredActivities.map((item) => {
+                            {activities.map((item) => {
                                 const badge = getActionBadge(item.action);
                                 const Icon = badge.icon;
                                 const isSelf = item.actor?._id === session?.user?.id;
@@ -365,6 +432,47 @@ export default function AdminActivityPage() {
                             })}
                         </div>
                     )}
+
+                    {/* Pagination Controls */}
+                    <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+                        <span>
+                            Showing{" "}
+                            <strong className="text-slate-800">
+                                {activities.length === 0 ? 0 : (pagination.page - 1) * pagination.limit + 1}
+                            </strong>{" "}
+                            to{" "}
+                            <strong className="text-slate-800">
+                                {Math.min(pagination.page * pagination.limit, pagination.totalCount)}
+                            </strong>{" "}
+                            of <strong className="text-slate-800">{pagination.totalCount}</strong> activities
+                        </span>
+
+                        <div className="flex items-center gap-2">
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={pagination.page <= 1 || loading}
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                className="h-8 px-2.5 rounded-lg border-slate-200 text-xs cursor-pointer"
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5 mr-1" />
+                                Previous
+                            </Button>
+                            <span className="px-2 font-mono font-medium text-slate-700">
+                                {pagination.page} / {pagination.totalPages}
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={pagination.page >= pagination.totalPages || loading}
+                                onClick={() => setPage((p) => Math.min(pagination.totalPages, p + 1))}
+                                className="h-8 px-2.5 rounded-lg border-slate-200 text-xs cursor-pointer"
+                            >
+                                Next
+                                <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                            </Button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </DashboardShell>

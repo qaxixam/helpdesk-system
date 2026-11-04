@@ -61,6 +61,7 @@ export default function AdminTicketsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
 
+    const [searchInput, setSearchInput] = useState("");
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [priorityFilter, setPriorityFilter] = useState("ALL");
@@ -73,6 +74,15 @@ export default function AdminTicketsPage() {
         totalCount: 0,
         totalPages: 1,
     });
+
+    // Debounce search to prevent query flooding
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearch(searchInput);
+            setPage(1);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
 
     const [assigningId, setAssigningId] = useState<string | null>(null);
 
@@ -255,11 +265,8 @@ export default function AdminTicketsPage() {
                         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                         <Input
                             placeholder="Search by ticket number or incident name..."
-                            value={search}
-                            onChange={(e) => {
-                                setSearch(e.target.value);
-                                setPage(1);
-                            }}
+                            value={searchInput}
+                            onChange={(e) => setSearchInput(e.target.value)}
                             className="pl-10 h-10 rounded-xl bg-slate-50/70 border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white w-full"
                         />
                     </div>

@@ -70,13 +70,36 @@ export default function MyTicketsPage() {
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [priorityFilter, setPriorityFilter] = useState("ALL");
     const [categoryFilter, setCategoryFilter] = useState("ALL");
+    const [searchInput, setSearchInput] = useState("");
     const [search, setSearch] = useState("");
+
+    // Debounce search input to avoid excessive network calls
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setSearch(searchInput);
+            setPage(1);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [searchInput]);
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
             router.push("/login");
         }
     }, [sessionStatus, router]);
+
+    // Fetch categories once on authenticated mount
+    useEffect(() => {
+        if (sessionStatus !== "authenticated") return;
+        const controller = new AbortController();
+        fetch("/api/categories", { signal: controller.signal })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+                if (data?.categories) setCategories(data.categories);
+            })
+            .catch(() => {});
+        return () => controller.abort();
+    }, [sessionStatus]);
 
     const fetchTickets = useCallback(async () => {
         try {
@@ -110,13 +133,6 @@ export default function MyTicketsPage() {
     useEffect(() => {
         if (sessionStatus !== "authenticated") return;
         const controller = new AbortController();
-
-        fetch("/api/categories", { signal: controller.signal })
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data?.categories) setCategories(data.categories);
-            })
-            .catch(() => {});
 
         const params = new URLSearchParams({
             page: String(page),
@@ -231,11 +247,8 @@ export default function MyTicketsPage() {
                                 <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                                 <Input
                                     placeholder="Search TKT or title..."
-                                    value={search}
-                                    onChange={(e) => {
-                                        setSearch(e.target.value);
-                                        setPage(1);
-                                    }}
+                                    value={searchInput}
+                                    onChange={(e) => setSearchInput(e.target.value)}
                                     className="pl-8 h-9 text-xs rounded-xl border-slate-200 bg-slate-50/50 focus:bg-white w-full"
                                 />
                             </div>
