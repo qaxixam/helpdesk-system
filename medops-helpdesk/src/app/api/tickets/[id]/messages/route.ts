@@ -110,7 +110,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
 
     await ticket.save();
 
-    await ActivityLog.create({
+    const activityLog = await ActivityLog.create({
       ticket: ticket._id,
       actor: user.id,
       action: isInternal ? "INTERNAL_NOTE_ADDED" : "REPLY_POSTED",
@@ -158,11 +158,39 @@ export async function POST(req: NextRequest, context: RouteContext) {
       }
     }
 
-    const populatedMessage = await Message.findById(message._id)
-      .populate("author", "name email role facility")
-      .lean();
-
-    return NextResponse.json({ message: populatedMessage }, { status: 201 });
+    return NextResponse.json(
+      {
+        message: {
+          _id: message._id,
+          ticket: message.ticket,
+          body: message.body,
+          attachments: message.attachments,
+          isInternal: message.isInternal,
+          createdAt: message.createdAt,
+          author: {
+            _id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            facility: user.facility,
+          },
+        },
+        activityLog: {
+          _id: activityLog._id,
+          action: activityLog.action,
+          details: activityLog.details,
+          createdAt: activityLog.createdAt,
+          actor: { name: user.name, role: user.role },
+        },
+        ticket: {
+          status: ticket.status,
+          firstRespondedAt: ticket.firstRespondedAt,
+          resolvedAt: ticket.resolvedAt,
+          slaBreached: ticket.slaBreached,
+        },
+      },
+      { status: 201 }
+    );
   } catch (error) {
     console.error("POST /api/tickets/[id]/messages error:", error);
     return NextResponse.json(

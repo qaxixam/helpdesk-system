@@ -14,7 +14,6 @@ const ActivityLogSchema = new Schema<IActivityLog>(
             type: Schema.Types.ObjectId,
             ref: "Ticket",
             required: true,
-            index: true,
         },
         actor: {
             type: Schema.Types.ObjectId,
@@ -29,7 +28,7 @@ const ActivityLogSchema = new Schema<IActivityLog>(
 
 ActivityLogSchema.index({ createdAt: -1 });
 ActivityLogSchema.index({ actor: 1, createdAt: -1 });
-ActivityLogSchema.index({ ticket: 1, createdAt: -1 });
+ActivityLogSchema.index({ ticket: 1, createdAt: -1, _id: -1 });
 
 export const ActivityLog: Model<IActivityLog> =
     mongoose.models.ActivityLog ||

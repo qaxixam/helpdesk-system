@@ -7,7 +7,6 @@ import { User } from "@/models/User";
 import { ActivityLog } from "@/models/ActivityLog";
 import { createTicketSchema } from "@/lib/validations";
 import { calculateSLADates } from "@/lib/sla";
-import { syncSLAsAndAutoClose } from "@/lib/ticket-lifecycle";
 import { sendTicketEmail } from "@/lib/mail";
 
 export async function GET(req: NextRequest) {
@@ -19,9 +18,6 @@ export async function GET(req: NextRequest) {
         // Ensure Category & User models are registered before populate
         void Category;
         void User;
-
-        // Sync SLA breaches & 3-day auto-close in real time
-        void syncSLAsAndAutoClose();
 
         const { searchParams } = new URL(req.url);
         const page = Math.max(1, Number(searchParams.get("page")) || 1);

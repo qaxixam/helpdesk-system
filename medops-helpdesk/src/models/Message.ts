@@ -26,7 +26,6 @@ const MessageSchema = new Schema<IMessage>(
       type: Schema.Types.ObjectId,
       ref: "Ticket",
       required: true,
-      index: true,
     },
     author: {
       type: Schema.Types.ObjectId,
@@ -39,6 +38,9 @@ const MessageSchema = new Schema<IMessage>(
   },
   { timestamps: true }
 );
+
+MessageSchema.index({ ticket: 1, createdAt: -1, _id: -1 });
+MessageSchema.index({ createdAt: 1 });
 
 export const Message: Model<IMessage> =
   mongoose.models.Message || mongoose.model<IMessage>("Message", MessageSchema);

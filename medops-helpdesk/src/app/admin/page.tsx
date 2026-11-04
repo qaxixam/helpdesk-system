@@ -282,7 +282,6 @@ export default function AdminOverviewPage() {
             if (!res.ok) throw new Error(resData.error || "Failed to assign engineer");
 
             toast.success("Incident assigned to support engineer!");
-            // Instantly remove ticket from the unassigned list in state
             setData((prev) => {
                 if (!prev) return prev;
                 return {
@@ -294,6 +293,7 @@ export default function AdminOverviewPage() {
                     },
                 };
             });
+            await fetchAnalytics();
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Assignment failed";
             toast.error(msg);
@@ -663,9 +663,9 @@ export default function AdminOverviewPage() {
                                 <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
                                     Unassigned Hospital Incidents
                                 </h3>
-                                {(data?.unassignedTickets?.length ?? 0) > 0 ? (
+                                {(summary?.unassignedCount ?? 0) > 0 ? (
                                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                                        {data?.unassignedTickets.length} Needs Assignment
+                                        {summary?.unassignedCount} Needs Assignment
                                     </span>
                                 ) : (
                                     <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">

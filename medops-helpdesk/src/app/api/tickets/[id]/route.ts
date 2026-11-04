@@ -15,7 +15,9 @@ interface RouteContext {
     params: Promise<{ id: string }>;
 }
 
-export async function GET(_req: NextRequest, context: RouteContext) {
+const HISTORY_PAGE_SIZE = 50;
+
+export async function GET(req: NextRequest, context: RouteContext) {
     const { user, errorResponse } = await requireAuth();
     if (errorResponse || !user) return errorResponse!;
 
@@ -24,23 +26,49 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         return NextResponse.json({ error: "Invalid ticket ID" }, { status: 400 });
     }
 
+    const { searchParams } = new URL(req.url);
+    const history = searchParams.get("history");
+    if (history && history !== "messages" && history !== "activity") {
+        return NextResponse.json({ error: "Invalid history type" }, { status: 400 });
+    }
+
+    const beforeAt = searchParams.get("beforeAt");
+    const beforeId = searchParams.get("beforeId");
+    let beforeDate: Date | null = null;
+    if (history) {
+        beforeDate = beforeAt ? new Date(beforeAt) : null;
+        if (!beforeDate || Number.isNaN(beforeDate.getTime()) || !mongoose.Types.ObjectId.isValid(beforeId)) {
+            return NextResponse.json({ error: "A valid history cursor is required" }, { status: 400 });
+        }
+    }
+
     await connectDB();
     void Category;
     void User;
 
-    const ticket = await Ticket.findById(id)
-        .populate("category", "name description defaultPriority")
-        .populate("createdBy", "name email facility role")
-        .populate("assignedAgent", "name email facility role")
-        .lean();
+    const ticketQuery = Ticket.findById(id);
+    if (history) {
+        ticketQuery
+            .select("createdBy assignedAgent")
+            .populate("createdBy", "_id")
+            .populate("assignedAgent", "_id");
+    } else {
+        ticketQuery
+            .populate("category", "name description defaultPriority")
+            .populate("createdBy", "name email facility role")
+            .populate("assignedAgent", "name email facility role");
+    }
+    const ticket = await ticketQuery.lean();
 
     if (!ticket) {
         return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
     }
 
     // STRICT API-LEVEL AUTHORIZATION CHECK
-    const creatorId = ticket.createdBy._id.toString();
-    const agentId = ticket.assignedAgent?._id?.toString();
+    const creator = ticket.createdBy as unknown as { _id?: { toString(): string } } | string;
+    const assigned = ticket.assignedAgent as unknown as { _id?: { toString(): string } } | string | null;
+    const creatorId = typeof creator === "string" ? creator : creator?._id?.toString();
+    const agentId = typeof assigned === "string" ? assigned : assigned?._id?.toString();
 
     if (user.role === "user" && creatorId !== user.id) {
         return NextResponse.json(
@@ -62,21 +90,52 @@ export async function GET(_req: NextRequest, context: RouteContext) {
         messageFilter.isInternal = false;
     }
 
-    const [messages, activityLogs] = await Promise.all([
-        Message.find(messageFilter)
-            .populate("author", "name email role facility")
-            .sort({ createdAt: 1 })
-            .lean(),
-        ActivityLog.find({ ticket: id })
-            .populate("actor", "name email role")
-            .sort({ createdAt: -1 })
-            .lean(),
+    const cursorFilter = beforeDate && beforeId
+        ? {
+              $or: [
+                  { createdAt: { $lt: beforeDate } },
+                  { createdAt: beforeDate, _id: { $lt: new mongoose.Types.ObjectId(beforeId) } },
+              ],
+          }
+        : {};
+
+    const [messageRows, activityRows] = await Promise.all([
+        history === "activity"
+            ? Promise.resolve([])
+            : Message.find({ ...messageFilter, ...cursorFilter })
+                  .select("ticket author body attachments isInternal createdAt")
+                  .populate("author", "name email role facility")
+                  .sort({ createdAt: -1, _id: -1 })
+                  .limit(HISTORY_PAGE_SIZE + 1)
+                  .lean(),
+        history === "messages"
+            ? Promise.resolve([])
+            : ActivityLog.find({ ticket: id, ...cursorFilter })
+                  .select("ticket actor action details createdAt")
+                  .populate("actor", "name email role")
+                  .sort({ createdAt: -1, _id: -1 })
+                  .limit(HISTORY_PAGE_SIZE + 1)
+                  .lean(),
     ]);
+
+    const hasMoreMessages = messageRows.length > HISTORY_PAGE_SIZE;
+    const hasMoreActivity = activityRows.length > HISTORY_PAGE_SIZE;
+    const messages = messageRows.slice(0, HISTORY_PAGE_SIZE).reverse();
+    const activityLogs = activityRows.slice(0, HISTORY_PAGE_SIZE);
+
+    if (history === "messages") {
+        return NextResponse.json({ messages, hasMoreMessages });
+    }
+    if (history === "activity") {
+        return NextResponse.json({ activityLogs, hasMoreActivity });
+    }
 
     return NextResponse.json({
         ticket,
         messages,
         activityLogs,
+        hasMoreMessages,
+        hasMoreActivity,
     });
 }
 

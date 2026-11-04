@@ -116,6 +116,9 @@ function TicketDetailContent({ params }: PageProps) {
     const [ticket, setTicket] = useState<TicketDetail | null>(null);
     const [messages, setMessages] = useState<MessageItem[]>([]);
     const [activityLogs, setActivityLogs] = useState<ActivityItem[]>([]);
+    const [hasMoreMessages, setHasMoreMessages] = useState(false);
+    const [hasMoreActivity, setHasMoreActivity] = useState(false);
+    const [loadingHistory, setLoadingHistory] = useState<"messages" | "activity" | null>(null);
     const [agents, setAgents] = useState<AgentOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
@@ -127,15 +130,14 @@ function TicketDetailContent({ params }: PageProps) {
     const [uploading, setUploading] = useState(false);
     const [posting, setPosting] = useState(false);
     const [updatingMeta, setUpdatingMeta] = useState(false);
+    const historyControllerRef = useRef<AbortController | null>(null);
 
-    const hasFetchedRef = useRef(false);
-
-    const fetchTicketDetails = useCallback(async () => {
+    const fetchTicketDetails = useCallback(async (signal?: AbortSignal) => {
         if (!id) return;
         try {
             setLoading(true);
             setError("");
-            const res = await fetch(`/api/tickets/${id}`);
+            const res = await fetch(`/api/tickets/${id}`, { cache: "no-store", signal });
             const data = await res.json();
             if (!res.ok) {
                 setError(data.error || "Unable to access this ticket");
@@ -143,11 +145,14 @@ function TicketDetailContent({ params }: PageProps) {
                 setTicket(data.ticket);
                 setMessages(data.messages || []);
                 setActivityLogs(data.activityLogs || []);
+                setHasMoreMessages(Boolean(data.hasMoreMessages));
+                setHasMoreActivity(Boolean(data.hasMoreActivity));
             }
-        } catch {
+        } catch (fetchError) {
+            if (fetchError instanceof DOMException && fetchError.name === "AbortError") return;
             setError("Network error loading ticket details");
         } finally {
-            setLoading(false);
+            if (!signal?.aborted) setLoading(false);
         }
     }, [id]);
 
@@ -156,20 +161,37 @@ function TicketDetailContent({ params }: PageProps) {
             router.push("/login");
             return;
         }
-        if (sessionStatus === "authenticated") {
-            if (!hasFetchedRef.current) {
-                hasFetchedRef.current = true;
-                fetchTicketDetails();
-                if (session?.user?.role === "admin") {
-                    fetch("/api/users?role=agent")
-                        .then((r) => r.json())
-                        .then((d) => {
-                            if (d.users) setAgents(d.users);
-                        })
-                        .catch(() => {});
-                }
-            }
+        if (sessionStatus !== "authenticated") return;
+
+        const controller = new AbortController();
+        historyControllerRef.current?.abort();
+        historyControllerRef.current = null;
+        setTicket(null);
+        setMessages([]);
+        setActivityLogs([]);
+        setHasMoreMessages(false);
+        setHasMoreActivity(false);
+        setLoadingHistory(null);
+        setLoading(true);
+        fetchTicketDetails(controller.signal);
+
+        if (session?.user?.role === "admin") {
+            fetch("/api/users?role=agent", { cache: "no-store", signal: controller.signal })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => {
+                    if (d?.users) setAgents(d.users);
+                })
+                .catch((fetchError) => {
+                    if (!(fetchError instanceof DOMException && fetchError.name === "AbortError")) {
+                        setAgents([]);
+                    }
+                });
         }
+
+        return () => {
+            controller.abort();
+            historyControllerRef.current?.abort();
+        };
     }, [sessionStatus, session?.user?.role, router, fetchTicketDetails]);
 
     async function handleUpdateTicket(payload: {
@@ -189,12 +211,48 @@ function TicketDetailContent({ params }: PageProps) {
                 toast.error(data.error || "Update failed");
             } else {
                 toast.success("Ticket updated");
-                fetchTicketDetails();
+                if (data.ticket) setTicket(data.ticket);
             }
         } catch {
             toast.error("Failed to update ticket");
         } finally {
             setUpdatingMeta(false);
+        }
+    }
+
+    async function loadOlderHistory(kind: "messages" | "activity") {
+        const cursorItem = kind === "messages" ? messages[0] : activityLogs[activityLogs.length - 1];
+        if (!id || !cursorItem || loadingHistory) return;
+
+        const controller = new AbortController();
+        historyControllerRef.current?.abort();
+        historyControllerRef.current = controller;
+        setLoadingHistory(kind);
+        try {
+            const params = new URLSearchParams({
+                history: kind,
+                beforeAt: cursorItem.createdAt,
+                beforeId: cursorItem._id,
+            });
+            const res = await fetch(`/api/tickets/${id}?${params}`, { cache: "no-store", signal: controller.signal });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Could not load older history");
+
+            if (kind === "messages") {
+                setMessages((current) => [...(data.messages || []), ...current]);
+                setHasMoreMessages(Boolean(data.hasMoreMessages));
+            } else {
+                setActivityLogs((current) => [...current, ...(data.activityLogs || [])]);
+                setHasMoreActivity(Boolean(data.hasMoreActivity));
+            }
+        } catch (loadError) {
+            if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+            toast.error(loadError instanceof Error ? loadError.message : "Could not load older history");
+        } finally {
+            if (historyControllerRef.current === controller) {
+                historyControllerRef.current = null;
+                setLoadingHistory(null);
+            }
         }
     }
 
@@ -256,7 +314,9 @@ function TicketDetailContent({ params }: PageProps) {
                 setReplyBody("");
                 setIsInternal(false);
                 setReplyAttachments([]);
-                fetchTicketDetails();
+                if (data.message) setMessages((current) => [...current, data.message]);
+                if (data.activityLog) setActivityLogs((current) => [data.activityLog, ...current]);
+                if (data.ticket) setTicket((current) => current ? { ...current, ...data.ticket } : current);
             }
         } catch {
             toast.error("Network error while posting message");
@@ -436,8 +496,21 @@ function TicketDetailContent({ params }: PageProps) {
                         {/* Communication / Message History */}
                         <div className="space-y-4">
                             <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
-                                Incident Communication & Diagnostic Updates ({messages.length})
+                                Incident Communication & Diagnostic Updates ({messages.length} loaded)
                             </h2>
+
+                            {hasMoreMessages && (
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={loadingHistory !== null}
+                                    onClick={() => loadOlderHistory("messages")}
+                                    className="rounded-lg text-xs"
+                                >
+                                    {loadingHistory === "messages" ? "Loading older replies…" : "Load older replies"}
+                                </Button>
+                            )}
 
                             {messages.length === 0 ? (
                                 <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center text-xs text-slate-400 shadow-baligo">
@@ -496,6 +569,8 @@ function TicketDetailContent({ params }: PageProps) {
                                                                     <img
                                                                         src={att.url}
                                                                         alt={att.name}
+                                                                        loading="lazy"
+                                                                        decoding="async"
                                                                         className="w-full h-full object-cover group-hover:scale-105 transition"
                                                                     />
                                                                     <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
@@ -843,8 +918,21 @@ function TicketDetailContent({ params }: PageProps) {
                                 <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-4">
                                     <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                                         <History className="h-3.5 w-3.5" />
-                                        Audit Activity Log ({activityLogs.length})
+                                        Audit Activity Log ({activityLogs.length} loaded)
                                     </h3>
+
+                                    {hasMoreActivity && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            disabled={loadingHistory !== null}
+                                            onClick={() => loadOlderHistory("activity")}
+                                            className="rounded-lg text-xs"
+                                        >
+                                            {loadingHistory === "activity" ? "Loading older activity…" : "Load older activity"}
+                                        </Button>
+                                    )}
 
                                     <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                                         {activityLogs.map((log) => (
