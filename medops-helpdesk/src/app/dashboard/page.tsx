@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { SLACountdown } from "@/components/sla-countdown";
 import { CreateTicketModal } from "@/components/create-ticket-modal";
 import { StatCard } from "@/components/ui/stat-card";
@@ -59,10 +61,7 @@ export default function DashboardPage() {
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
 
-    const [tickets, setTickets] = useState<TicketRow[]>([]);
-    const [categories, setCategories] = useState<CategoryItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    const queryClient = useQueryClient();
 
     const [search, setSearch] = useState("");
     const [statusFilter, setStatusFilter] = useState("ALL");
@@ -70,12 +69,40 @@ export default function DashboardPage() {
     const [categoryFilter, setCategoryFilter] = useState("ALL");
     const [breachedOnly, setBreachedOnly] = useState(false);
     const [page, setPage] = useState(1);
-    const [pagination, setPagination] = useState({
-        page: 1,
-        limit: 8,
-        totalCount: 0,
-        totalPages: 1,
+    const params = new URLSearchParams({ page: String(page), limit: "8" });
+    if (statusFilter !== "ALL") params.set("status", statusFilter);
+    if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
+    if (categoryFilter !== "ALL") params.set("category", categoryFilter);
+    if (search.trim()) params.set("search", search.trim());
+    if (breachedOnly) params.set("breached", "true");
+
+    const ticketsQuery = useQuery({
+        queryKey: ["tickets", "dashboard", session?.user?.id, session?.user?.role, page, statusFilter, priorityFilter, categoryFilter, search.trim(), breachedOnly],
+        queryFn: ({ signal }) => fetchJson<{ tickets: TicketRow[]; pagination: { page: number; limit: number; totalCount: number; totalPages: number } }>(
+            `/api/tickets?${params.toString()}`,
+            { signal },
+        ),
+        enabled: sessionStatus === "authenticated" && session?.user?.role !== "admin",
     });
+    const agentOverviewQuery = useQuery({
+        queryKey: ["agent", "overview", session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<{ summary: { totalAssigned: number; active: number; urgent: number; breached: number; resolved: number; resolutionRate: number } }>("/api/agent/overview", { signal }),
+        enabled: sessionStatus === "authenticated" && session?.user?.role === "agent",
+    });
+    const categoriesQuery = useQuery({
+        queryKey: ["categories"],
+        queryFn: ({ signal }) => fetchJson<{ categories: CategoryItem[] }>("/api/categories", { signal }),
+        enabled: sessionStatus === "authenticated" && session?.user?.role === "user",
+    });
+    const tickets = ticketsQuery.data?.tickets ?? [];
+    const categories = categoriesQuery.data?.categories ?? [];
+    const pagination = ticketsQuery.data?.pagination ?? { page: 1, limit: 8, totalCount: 0, totalPages: 1 };
+    const loading = ticketsQuery.isPending || (session?.user?.role === "agent" && agentOverviewQuery.isPending);
+    const error = ticketsQuery.error instanceof Error
+        ? ticketsQuery.error.message
+        : agentOverviewQuery.error instanceof Error
+            ? agentOverviewQuery.error.message
+            : "";
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
@@ -84,86 +111,6 @@ export default function DashboardPage() {
             router.replace("/admin");
         }
     }, [sessionStatus, session?.user?.role, router]);
-
-    const fetchTickets = useCallback(async () => {
-        try {
-            setLoading(true);
-            setError("");
-            const params = new URLSearchParams({
-                page: String(page),
-                limit: "8",
-            });
-            if (statusFilter !== "ALL") params.set("status", statusFilter);
-            if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
-            if (categoryFilter !== "ALL") params.set("category", categoryFilter);
-            if (search.trim()) params.set("search", search.trim());
-            if (breachedOnly) params.set("breached", "true");
-
-            const res = await fetch(`/api/tickets?${params.toString()}`);
-            const data = await res.json();
-
-            if (!res.ok) {
-                setError(data.error || "Failed to load tickets");
-            } else {
-                setTickets(data.tickets || []);
-                setPagination(data.pagination || { page: 1, limit: 8, totalCount: 0, totalPages: 1 });
-            }
-        } catch {
-            setError("Network error while fetching clinical tickets. Click Refresh to retry.");
-        } finally {
-            setLoading(false);
-        }
-    }, [page, statusFilter, priorityFilter, categoryFilter, search, breachedOnly]);
-
-    useEffect(() => {
-        if (sessionStatus !== "authenticated") return;
-        const controller = new AbortController();
-
-        fetch("/api/categories", { signal: controller.signal })
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data?.categories) setCategories(data.categories);
-            })
-            .catch(() => {});
-
-        const params = new URLSearchParams({
-            page: String(page),
-            limit: "8",
-        });
-        if (statusFilter !== "ALL") params.set("status", statusFilter);
-        if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
-        if (categoryFilter !== "ALL") params.set("category", categoryFilter);
-        if (search.trim()) params.set("search", search.trim());
-        if (breachedOnly) params.set("breached", "true");
-
-        fetch(`/api/tickets?${params.toString()}`, { signal: controller.signal })
-            .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error || "Failed to load tickets");
-                }
-                return data;
-            })
-            .then((data) => {
-                setTickets(data.tickets || []);
-                setPagination(data.pagination || { page: 1, limit: 8, totalCount: 0, totalPages: 1 });
-                setError("");
-            })
-            .catch((err: unknown) => {
-                if (err instanceof DOMException && err.name === "AbortError") {
-                    return; // React cleanup / unmount abort - ignore
-                }
-                const msg = err instanceof Error ? err.message : "Network error while fetching tickets";
-                setError(msg);
-            })
-            .finally(() => {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                }
-            });
-
-        return () => controller.abort();
-    }, [sessionStatus, page, statusFilter, priorityFilter, categoryFilter, search, breachedOnly]);
 
     const priorityBadge = (p: string) => {
         switch (p) {
@@ -214,7 +161,6 @@ export default function DashboardPage() {
     const waitingUserCount = tickets.filter((t) => t.status === "Waiting on User").length;
     const resolvedCount = tickets.filter((t) => t.status === "Resolved" || t.status === "Closed").length;
     const breachedCount = tickets.filter((t) => t.slaBreached).length;
-    const urgentCount = tickets.filter((t) => t.priority === "Urgent").length;
     const resolutionPercentage = pagination.totalCount > 0 ? Math.round((resolvedCount / pagination.totalCount) * 100) : 85;
 
     // Page titles & descriptions tailored to each role
@@ -224,8 +170,8 @@ export default function DashboardPage() {
             subtitle: "System-wide clinical incident oversight across all clinics, agents, and SLA targets",
         },
         agent: {
-            title: "Assigned Incident Queue & SLA Command",
-            subtitle: "Incidents assigned to your queue with active real-time SLA resolution countdowns",
+            title: "Engineer Overview",
+            subtitle: "Your assigned clinical incidents, response deadlines, and SLA workload",
         },
         user: {
             title: "Overview",
@@ -243,7 +189,10 @@ export default function DashboardPage() {
             action={
                 <div className="flex items-center gap-2.5 flex-wrap">
                     <button
-                        onClick={fetchTickets}
+                        onClick={() => {
+                            void ticketsQuery.refetch();
+                            if (role === "agent") void agentOverviewQuery.refetch();
+                        }}
                         title="Refresh data"
                         className="h-10 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
                     >
@@ -266,7 +215,8 @@ export default function DashboardPage() {
                             categories={categories}
                             onCreated={() => {
                                 setPage(1);
-                                fetchTickets();
+                                void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+                                void queryClient.invalidateQueries({ queryKey: ["activity"] });
                             }}
                         />
                     )}
@@ -310,35 +260,35 @@ export default function DashboardPage() {
                         />
                     </div>
                 ) : role === "agent" ? (
-                    /* Agent Cards: My Workload, Urgent <1h, SLA Breached, Resolution Rate */
+                    /* Agent workload is aggregated from tickets assigned to the signed-in agent. */
                     <div className="hidden sm:grid sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5 w-full min-w-0">
                         <StatCard
-                            label="My Assigned Queue"
-                            value={pagination.totalCount}
-                            change="+Active"
+                            label="Assigned Tickets"
+                            value={agentOverviewQuery.data?.summary.totalAssigned ?? 0}
+                            change="My queue"
                             isPositive={true}
-                            subtitle="Clinical tickets assigned to me"
+                            subtitle="Tickets assigned to your account"
                         />
                         <StatCard
-                            label="Urgent Priority (1h SLA)"
-                            value={urgentCount}
-                            change={urgentCount > 0 ? "CRITICAL" : "None"}
-                            isPositive={urgentCount === 0}
-                            subtitle="Strict 1-hour response window"
+                            label="Active Tickets"
+                            value={agentOverviewQuery.data?.summary.active ?? 0}
+                            change="In progress"
+                            isPositive={true}
+                            subtitle="Open, in progress, or waiting"
+                        />
+                        <StatCard
+                            label="Urgent Tickets"
+                            value={agentOverviewQuery.data?.summary.urgent ?? 0}
+                            change={(agentOverviewQuery.data?.summary.urgent ?? 0) > 0 ? "CRITICAL" : "None"}
+                            isPositive={(agentOverviewQuery.data?.summary.urgent ?? 0) === 0}
+                            subtitle="Open tickets with urgent priority"
                         />
                         <StatCard
                             label="SLA Breaches"
-                            value={breachedCount}
-                            change={breachedCount > 0 ? "ACTION NEEDED" : "COMPLIANT"}
-                            isPositive={breachedCount === 0}
-                            subtitle="Resolution deadline target"
-                        />
-                        <StatCard
-                            label="My Resolution Rate"
-                            value={`${resolutionPercentage}%`}
-                            change="+12.5%"
-                            isPositive={true}
-                            subtitle="Resolved within deadline"
+                            value={agentOverviewQuery.data?.summary.breached ?? 0}
+                            change={(agentOverviewQuery.data?.summary.breached ?? 0) > 0 ? "Review needed" : "No breaches"}
+                            isPositive={(agentOverviewQuery.data?.summary.breached ?? 0) === 0}
+                            subtitle="Assigned tickets past an SLA deadline"
                         />
                     </div>
                 ) : (
@@ -376,10 +326,10 @@ export default function DashboardPage() {
                 )}
 
                 {/* 2. MIDDLE WIDGETS (Agent & Admin Only) */}
-                {role !== "user" && (
+                {role === "admin" && (
                     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 w-full min-w-0">
                         <div className="lg:col-span-7 w-full min-w-0">
-                            <AnalyticsBarChart title={role === "agent" ? "My Incident Workload Overview" : "Hospital Incidents Overview"} />
+                            <AnalyticsBarChart title="Hospital Incidents Overview" />
                         </div>
 
                         <div className="lg:col-span-5 grid grid-cols-1 sm:grid-cols-2 gap-4 w-full min-w-0">
@@ -567,7 +517,8 @@ export default function DashboardPage() {
                                             categories={categories}
                                             onCreated={() => {
                                                 setPage(1);
-                                                fetchTickets();
+                                                void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+                                                void queryClient.invalidateQueries({ queryKey: ["activity"] });
                                             }}
                                             triggerText="Create Ticket"
                                         />

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,10 +60,7 @@ export default function AdminTeamPage() {
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
 
-    const [members, setMembers] = useState<TeamMember[]>([]);
-    const [workloads, setWorkloads] = useState<Record<string, AgentWorkloadItem>>({});
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    const queryClient = useQueryClient();
     const [search, setSearch] = useState("");
     const [roleFilter, setRoleFilter] = useState("ALL");
 
@@ -77,8 +76,6 @@ export default function AdminTeamPage() {
     const [creating, setCreating] = useState(false);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-    const hasFetchedRef = useRef(false);
-
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
             router.push("/login");
@@ -88,44 +85,23 @@ export default function AdminTeamPage() {
         }
     }, [sessionStatus, session?.user?.role, router]);
 
-    const fetchTeam = useCallback(async () => {
-        try {
-            setLoading(true);
-            setError("");
-            const [usersRes, analyticsRes] = await Promise.all([
-                fetch("/api/users?role=ALL"),
-                fetch("/api/admin/analytics"),
-            ]);
-
-            const usersData = await usersRes.json();
-            if (!usersRes.ok) throw new Error(usersData.error || "Failed to load team");
-            setMembers(usersData.users || []);
-
-            if (analyticsRes.ok) {
-                const analyticsData = await analyticsRes.json();
-                const workloadMap: Record<string, AgentWorkloadItem> = {};
-                if (analyticsData.agentWorkload) {
-                    analyticsData.agentWorkload.forEach((w: AgentWorkloadItem) => {
-                        workloadMap[w.agentId] = w;
-                    });
-                }
-                setWorkloads(workloadMap);
-            }
-        } catch {
-            setError("Network error while loading team members");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (sessionStatus === "authenticated" && session?.user?.role === "admin") {
-            if (!hasFetchedRef.current) {
-                hasFetchedRef.current = true;
-                fetchTeam();
-            }
-        }
-    }, [sessionStatus, session?.user?.role, fetchTeam]);
+    const teamQuery = useQuery({
+        queryKey: ["admin", "team", session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<{ users: TeamMember[] }>("/api/users?role=ALL", { signal }),
+        enabled: sessionStatus === "authenticated" && session?.user?.role === "admin",
+    });
+    const analyticsQuery = useQuery({
+        queryKey: ["admin", "analytics", session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<{ agentWorkload?: AgentWorkloadItem[] }>("/api/admin/analytics", { signal }),
+        enabled: sessionStatus === "authenticated" && session?.user?.role === "admin",
+    });
+    const members = teamQuery.data?.users ?? [];
+    const workloads = Object.fromEntries((analyticsQuery.data?.agentWorkload ?? []).map((item) => [item.agentId, item])) as Record<string, AgentWorkloadItem>;
+    const loading = teamQuery.isPending;
+    const error = teamQuery.error instanceof Error ? teamQuery.error.message : "";
+    const fetchTeam = async () => {
+        await Promise.all([teamQuery.refetch(), analyticsQuery.refetch()]);
+    };
 
     async function handleCreateAgent(e: React.FormEvent) {
         e.preventDefault();
@@ -149,7 +125,8 @@ export default function AdminTeamPage() {
                     role: "agent",
                     facility: "Main Medical Center",
                 });
-                fetchTeam();
+                await queryClient.invalidateQueries({ queryKey: ["admin", "team"] });
+                await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
             }
         } catch {
             toast.error("Network error while creating account");
@@ -170,9 +147,8 @@ export default function AdminTeamPage() {
             if (!res.ok) throw new Error(data.error || "Failed to update user status");
 
             toast.success(`User ${!currentStatus ? "activated" : "deactivated"} successfully!`);
-            setMembers((prev) =>
-                prev.map((m) => (m._id === userId ? { ...m, isActive: !currentStatus } : m))
-            );
+            await queryClient.invalidateQueries({ queryKey: ["admin", "team"] });
+            await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Update failed";
             toast.error(msg);
@@ -193,9 +169,8 @@ export default function AdminTeamPage() {
             if (!res.ok) throw new Error(data.error || "Failed to update role");
 
             toast.success("Role updated successfully!");
-            setMembers((prev) =>
-                prev.map((m) => (m._id === userId ? { ...m, role: newRole as "admin" | "agent" | "user" } : m))
-            );
+            await queryClient.invalidateQueries({ queryKey: ["admin", "team"] });
+            await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Role change failed";
             toast.error(msg);

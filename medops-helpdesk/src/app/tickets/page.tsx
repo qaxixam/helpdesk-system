@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { CreateTicketModal } from "@/components/create-ticket-modal";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -52,21 +54,13 @@ interface CategoryOption {
 
 export default function MyTicketsPage() {
     const router = useRouter();
-    const { status: sessionStatus } = useSession();
+    const { data: session, status: sessionStatus } = useSession();
+    const role = session?.user?.role;
 
-    const [tickets, setTickets] = useState<TicketRow[]>([]);
-    const [categories, setCategories] = useState<CategoryOption[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    const queryClient = useQueryClient();
 
     // Filters & Pagination
     const [page, setPage] = useState(1);
-    const [pagination, setPagination] = useState({
-        page: 1,
-        limit: 10,
-        totalCount: 0,
-        totalPages: 1,
-    });
     const [statusFilter, setStatusFilter] = useState("ALL");
     const [priorityFilter, setPriorityFilter] = useState("ALL");
     const [categoryFilter, setCategoryFilter] = useState("ALL");
@@ -85,92 +79,31 @@ export default function MyTicketsPage() {
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
             router.push("/login");
+        } else if (sessionStatus === "authenticated" && role === "admin") {
+            router.replace("/admin/tickets");
         }
-    }, [sessionStatus, router]);
+    }, [sessionStatus, role, router]);
 
-    // Fetch categories once on authenticated mount
-    useEffect(() => {
-        if (sessionStatus !== "authenticated") return;
-        const controller = new AbortController();
-        fetch("/api/categories", { signal: controller.signal })
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data?.categories) setCategories(data.categories);
-            })
-            .catch(() => {});
-        return () => controller.abort();
-    }, [sessionStatus]);
-
-    const fetchTickets = useCallback(async () => {
-        try {
-            setLoading(true);
-            setError("");
-            const params = new URLSearchParams({
-                page: String(page),
-                limit: "10",
-            });
-            if (statusFilter !== "ALL") params.set("status", statusFilter);
-            if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
-            if (categoryFilter !== "ALL") params.set("category", categoryFilter);
-            if (search.trim()) params.set("search", search.trim());
-
-            const res = await fetch(`/api/tickets?${params.toString()}`);
-            const data = await res.json();
-
-            if (!res.ok) {
-                setError(data.error || "Failed to load tickets");
-            } else {
-                setTickets(data.tickets || []);
-                setPagination(data.pagination || { page: 1, limit: 10, totalCount: 0, totalPages: 1 });
-            }
-        } catch {
-            setError("Network error while fetching tickets. Click Refresh to retry.");
-        } finally {
-            setLoading(false);
-        }
-    }, [page, statusFilter, priorityFilter, categoryFilter, search]);
-
-    useEffect(() => {
-        if (sessionStatus !== "authenticated") return;
-        const controller = new AbortController();
-
-        const params = new URLSearchParams({
-            page: String(page),
-            limit: "10",
-        });
-        if (statusFilter !== "ALL") params.set("status", statusFilter);
-        if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
-        if (categoryFilter !== "ALL") params.set("category", categoryFilter);
-        if (search.trim()) params.set("search", search.trim());
-
-        fetch(`/api/tickets?${params.toString()}`, { signal: controller.signal })
-            .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error || "Failed to load tickets");
-                }
-                return data;
-            })
-            .then((data) => {
-                setTickets(data.tickets || []);
-                setPagination(data.pagination || { page: 1, limit: 10, totalCount: 0, totalPages: 1 });
-                setError("");
-            })
-            .catch((err: unknown) => {
-                if (err instanceof DOMException && err.name === "AbortError") {
-                    return;
-                }
-                const msg = err instanceof Error ? err.message : "Network error while fetching tickets";
-                setError(msg);
-            })
-            .finally(() => {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                }
-            });
-
-        return () => controller.abort();
-    }, [sessionStatus, page, statusFilter, priorityFilter, categoryFilter, search]);
+    const params = new URLSearchParams({ page: String(page), limit: "10" });
+    if (statusFilter !== "ALL") params.set("status", statusFilter);
+    if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
+    if (categoryFilter !== "ALL") params.set("category", categoryFilter);
+    if (search.trim()) params.set("search", search.trim());
+    const ticketsQuery = useQuery({
+        queryKey: ["tickets", session?.user?.role === "agent" ? "assigned" : "mine", session?.user?.id, page, statusFilter, priorityFilter, categoryFilter, search.trim()],
+        queryFn: ({ signal }) => fetchJson<{ tickets: TicketRow[]; pagination: { page: number; limit: number; totalCount: number; totalPages: number } }>(`/api/tickets?${params.toString()}`, { signal }),
+        enabled: sessionStatus === "authenticated" && (role === "user" || role === "agent"),
+    });
+    const categoriesQuery = useQuery({
+        queryKey: ["categories"],
+        queryFn: ({ signal }) => fetchJson<{ categories: CategoryOption[] }>("/api/categories", { signal }),
+        enabled: sessionStatus === "authenticated" && role === "user",
+    });
+    const tickets = ticketsQuery.data?.tickets ?? [];
+    const categories = categoriesQuery.data?.categories ?? [];
+    const pagination = ticketsQuery.data?.pagination ?? { page: 1, limit: 10, totalCount: 0, totalPages: 1 };
+    const loading = ticketsQuery.isPending;
+    const error = ticketsQuery.error instanceof Error ? ticketsQuery.error.message : "";
 
     const priorityBadge = (p: string) => {
         switch (p) {
@@ -204,25 +137,30 @@ export default function MyTicketsPage() {
 
     return (
         <DashboardShell
-            title="My Tickets"
-            subtitle="Complete catalog of your clinical incident reports, conversation status, and resolutions"
+            title={role === "agent" ? "Assigned Tickets" : "My Tickets"}
+            subtitle={role === "agent"
+                ? "Manage tickets assigned to your support queue and review their SLA deadlines"
+                : "Complete catalog of your clinical incident reports, conversation status, and resolutions"}
             action={
                 <div className="flex items-center gap-2.5 flex-wrap">
                     <button
-                        onClick={fetchTickets}
+                        onClick={() => { void ticketsQuery.refetch(); }}
                         title="Refresh data"
                         className="h-10 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
                     >
                         <RefreshCw className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Refresh</span>
                     </button>
-                    <CreateTicketModal
-                        categories={categories}
-                        onCreated={() => {
-                            setPage(1);
-                            fetchTickets();
-                        }}
-                    />
+                    {role === "user" && (
+                        <CreateTicketModal
+                            categories={categories}
+                            onCreated={() => {
+                                setPage(1);
+                                void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+                                void queryClient.invalidateQueries({ queryKey: ["activity"] });
+                            }}
+                        />
+                    )}
                 </div>
             }
         >
@@ -234,7 +172,7 @@ export default function MyTicketsPage() {
                         <div className="flex items-center gap-2">
                             <SlidersHorizontal className="h-4 w-4 text-[#6052E9]" />
                             <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                                All Incident Records
+                                {role === "agent" ? "Assigned Incidents" : "All Incident Records"}
                             </h2>
                             <span className="text-xs bg-purple-50 text-[#6052E9] font-bold px-2 py-0.5 rounded-full border border-purple-100">
                                 {pagination.totalCount} total
@@ -340,18 +278,23 @@ export default function MyTicketsPage() {
                                     No incident tickets found
                                 </div>
                                 <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                                    You have not reported any incidents matching this criteria. Create a new ticket whenever you need support.
+                                    {role === "agent"
+                                        ? "No assigned tickets match these filters right now. New assignments will appear here."
+                                        : "You have not reported any incidents matching this criteria. Create a new ticket whenever you need support."}
                                 </p>
-                                <div className="pt-2">
-                                    <CreateTicketModal
-                                        categories={categories}
-                                        onCreated={() => {
-                                            setPage(1);
-                                            fetchTickets();
-                                        }}
-                                        triggerText="Create Ticket"
-                                    />
-                                </div>
+                                {role === "user" && (
+                                    <div className="pt-2">
+                                        <CreateTicketModal
+                                            categories={categories}
+                                            onCreated={() => {
+                                                setPage(1);
+                                                void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+                                                void queryClient.invalidateQueries({ queryKey: ["activity"] });
+                                            }}
+                                            triggerText="Create Ticket"
+                                        />
+                                    </div>
+                                )}
                             </div>
                         ) : (
                             <div className="overflow-x-auto w-full max-w-full">

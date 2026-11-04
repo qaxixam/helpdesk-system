@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { ActivitySkeleton } from "@/components/ui/skeleton";
 import {
     Select,
@@ -52,21 +54,13 @@ interface ActivityItem {
 export default function ActivityPage() {
     const router = useRouter();
     const { data: session, status: sessionStatus } = useSession();
+    const isAgent = session?.user?.role === "agent";
 
-    const [activities, setActivities] = useState<ActivityItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
     const [filter, setFilter] = useState<
         "ALL" | "TICKET_CREATED" | "REPLY_POSTED" | "STATUS_CHANGED" | "ASSIGNED"
     >("ALL");
     const [dateRange, setDateRange] = useState<"all" | "today" | "7d" | "30d">("all");
     const [page, setPage] = useState(1);
-    const [pagination, setPagination] = useState({
-        page: 1,
-        limit: 12,
-        totalCount: 0,
-        totalPages: 1,
-    });
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
@@ -74,71 +68,18 @@ export default function ActivityPage() {
         }
     }, [sessionStatus, router]);
 
-    const fetchActivities = useCallback(async () => {
-        try {
-            setLoading(true);
-            setError("");
-            const params = new URLSearchParams({
-                page: String(page),
-                limit: "12",
-                dateRange,
-            });
-            if (filter !== "ALL") params.set("action", filter);
-
-            const res = await fetch(`/api/activity?${params.toString()}`);
-            const data = await res.json();
-            if (!res.ok) {
-                setError(data.error || "Failed to load activity stream");
-            } else {
-                setActivities(data.activities || []);
-                setPagination(data.pagination || { page: 1, limit: 12, totalCount: 0, totalPages: 1 });
-            }
-        } catch {
-            setError("Network error while loading activities. Click Refresh to retry.");
-        } finally {
-            setLoading(false);
-        }
-    }, [page, filter, dateRange]);
-
-    useEffect(() => {
-        if (sessionStatus !== "authenticated") return;
-        const controller = new AbortController();
-
-        const params = new URLSearchParams({
-            page: String(page),
-            limit: "12",
-            dateRange,
-        });
-        if (filter !== "ALL") params.set("action", filter);
-
-        fetch(`/api/activity?${params.toString()}`, { signal: controller.signal })
-            .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) {
-                    throw new Error(data.error || "Failed to load activity stream");
-                }
-                return data;
-            })
-            .then((data) => {
-                setActivities(data.activities || []);
-                setPagination(data.pagination || { page: 1, limit: 12, totalCount: 0, totalPages: 1 });
-                setError("");
-            })
-            .catch((err: unknown) => {
-                if (err instanceof DOMException && err.name === "AbortError") {
-                    return;
-                }
-                const msg = err instanceof Error ? err.message : "Network error while loading activities";
-                setError(msg);
-            })
-            .finally(() => {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                }
-            });
-
-        return () => controller.abort();
-    }, [sessionStatus, page, filter, dateRange]);
+    const params = new URLSearchParams({ page: String(page), limit: "12", dateRange });
+    if (filter !== "ALL") params.set("action", filter);
+    const activitiesQuery = useQuery({
+        queryKey: ["activity", session?.user?.id, session?.user?.role, page, filter, dateRange],
+        queryFn: ({ signal }) => fetchJson<{ activities: ActivityItem[]; pagination: { page: number; limit: number; totalCount: number; totalPages: number } }>(`/api/activity?${params.toString()}`, { signal }),
+        enabled: sessionStatus === "authenticated",
+    });
+    const activities = activitiesQuery.data?.activities ?? [];
+    const pagination = activitiesQuery.data?.pagination ?? { page: 1, limit: 12, totalCount: 0, totalPages: 1 };
+    const loading = activitiesQuery.isPending;
+    const error = activitiesQuery.error instanceof Error ? activitiesQuery.error.message : "";
+    const fetchActivities = () => activitiesQuery.refetch();
 
     const currentUserId = session?.user?.id;
 
@@ -189,8 +130,10 @@ export default function ActivityPage() {
 
     return (
         <DashboardShell
-            title="Activity Stream"
-            subtitle="Real-time audit log of all your submitted incidents, conversations, and status milestones"
+            title={isAgent ? "Agent Activity" : "Activity Stream"}
+            subtitle={isAgent
+                ? "Updates and conversation history for tickets assigned to your support queue"
+                : "Real-time audit log of your incidents, conversations, and status milestones"}
             action={
                 <button
                     onClick={fetchActivities}

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef, use, Suspense } from "react";
+import { useEffect, useState, use, Suspense } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { SLACountdown } from "@/components/sla-countdown";
 import { TicketDetailSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -112,6 +114,7 @@ function TicketDetailContent({ params }: PageProps) {
     const id = unwrappedParams?.id;
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
+    const queryClient = useQueryClient();
 
     const [ticket, setTicket] = useState<TicketDetail | null>(null);
     const [messages, setMessages] = useState<MessageItem[]>([]);
@@ -119,9 +122,6 @@ function TicketDetailContent({ params }: PageProps) {
     const [hasMoreMessages, setHasMoreMessages] = useState(false);
     const [hasMoreActivity, setHasMoreActivity] = useState(false);
     const [loadingHistory, setLoadingHistory] = useState<"messages" | "activity" | null>(null);
-    const [agents, setAgents] = useState<AgentOption[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
     const [selectedPreview, setSelectedPreview] = useState<Attachment | null>(null);
 
     const [replyBody, setReplyBody] = useState("");
@@ -130,69 +130,43 @@ function TicketDetailContent({ params }: PageProps) {
     const [uploading, setUploading] = useState(false);
     const [posting, setPosting] = useState(false);
     const [updatingMeta, setUpdatingMeta] = useState(false);
-    const historyControllerRef = useRef<AbortController | null>(null);
 
-    const fetchTicketDetails = useCallback(async (signal?: AbortSignal) => {
-        if (!id) return;
-        try {
-            setLoading(true);
-            setError("");
-            const res = await fetch(`/api/tickets/${id}`, { cache: "no-store", signal });
-            const data = await res.json();
-            if (!res.ok) {
-                setError(data.error || "Unable to access this ticket");
-            } else {
-                setTicket(data.ticket);
-                setMessages(data.messages || []);
-                setActivityLogs(data.activityLogs || []);
-                setHasMoreMessages(Boolean(data.hasMoreMessages));
-                setHasMoreActivity(Boolean(data.hasMoreActivity));
-            }
-        } catch (fetchError) {
-            if (fetchError instanceof DOMException && fetchError.name === "AbortError") return;
-            setError("Network error loading ticket details");
-        } finally {
-            if (!signal?.aborted) setLoading(false);
-        }
-    }, [id]);
+    const ticketQuery = useQuery({
+        queryKey: ["ticket", id, session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<{
+            ticket: TicketDetail;
+            messages: MessageItem[];
+            activityLogs: ActivityItem[];
+            hasMoreMessages: boolean;
+            hasMoreActivity: boolean;
+        }>(`/api/tickets/${id}`, { cache: "no-store", signal }),
+        enabled: Boolean(id) && sessionStatus === "authenticated",
+        staleTime: 0,
+    });
+    const agentsQuery = useQuery({
+        queryKey: ["users", "agents", session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<{ users: AgentOption[] }>("/api/users?role=agent", { cache: "no-store", signal }),
+        enabled: sessionStatus === "authenticated" && session?.user?.role === "admin",
+    });
+    const agents = agentsQuery.data?.users ?? [];
+    const loading = ticketQuery.isPending;
+    const error = ticketQuery.error instanceof Error ? ticketQuery.error.message : "";
+
+    useEffect(() => {
+        const result = ticketQuery.data;
+        if (!result) return;
+        setTicket(result.ticket);
+        setMessages(result.messages || []);
+        setActivityLogs(result.activityLogs || []);
+        setHasMoreMessages(Boolean(result.hasMoreMessages));
+        setHasMoreActivity(Boolean(result.hasMoreActivity));
+    }, [ticketQuery.data]);
 
     useEffect(() => {
         if (sessionStatus === "unauthenticated") {
             router.push("/login");
-            return;
         }
-        if (sessionStatus !== "authenticated") return;
-
-        const controller = new AbortController();
-        historyControllerRef.current?.abort();
-        historyControllerRef.current = null;
-        setTicket(null);
-        setMessages([]);
-        setActivityLogs([]);
-        setHasMoreMessages(false);
-        setHasMoreActivity(false);
-        setLoadingHistory(null);
-        setLoading(true);
-        fetchTicketDetails(controller.signal);
-
-        if (session?.user?.role === "admin") {
-            fetch("/api/users?role=agent", { cache: "no-store", signal: controller.signal })
-                .then((r) => (r.ok ? r.json() : null))
-                .then((d) => {
-                    if (d?.users) setAgents(d.users);
-                })
-                .catch((fetchError) => {
-                    if (!(fetchError instanceof DOMException && fetchError.name === "AbortError")) {
-                        setAgents([]);
-                    }
-                });
-        }
-
-        return () => {
-            controller.abort();
-            historyControllerRef.current?.abort();
-        };
-    }, [sessionStatus, session?.user?.role, router, fetchTicketDetails]);
+    }, [sessionStatus, router]);
 
     async function handleUpdateTicket(payload: {
         status?: string;
@@ -212,6 +186,10 @@ function TicketDetailContent({ params }: PageProps) {
             } else {
                 toast.success("Ticket updated");
                 if (data.ticket) setTicket(data.ticket);
+                await queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+                await queryClient.invalidateQueries({ queryKey: ["tickets"] });
+                await queryClient.invalidateQueries({ queryKey: ["activity"] });
+                await queryClient.invalidateQueries({ queryKey: ["agent", "overview"] });
             }
         } catch {
             toast.error("Failed to update ticket");
@@ -224,9 +202,6 @@ function TicketDetailContent({ params }: PageProps) {
         const cursorItem = kind === "messages" ? messages[0] : activityLogs[activityLogs.length - 1];
         if (!id || !cursorItem || loadingHistory) return;
 
-        const controller = new AbortController();
-        historyControllerRef.current?.abort();
-        historyControllerRef.current = controller;
         setLoadingHistory(kind);
         try {
             const params = new URLSearchParams({
@@ -234,9 +209,15 @@ function TicketDetailContent({ params }: PageProps) {
                 beforeAt: cursorItem.createdAt,
                 beforeId: cursorItem._id,
             });
-            const res = await fetch(`/api/tickets/${id}?${params}`, { cache: "no-store", signal: controller.signal });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Could not load older history");
+            const data = await queryClient.fetchQuery({
+                queryKey: ["ticket-history", id, kind, cursorItem.createdAt, cursorItem._id],
+                queryFn: ({ signal }) => fetchJson<{
+                    messages?: MessageItem[];
+                    activityLogs?: ActivityItem[];
+                    hasMoreMessages?: boolean;
+                    hasMoreActivity?: boolean;
+                }>(`/api/tickets/${id}?${params}`, { cache: "no-store", signal }),
+            });
 
             if (kind === "messages") {
                 setMessages((current) => [...(data.messages || []), ...current]);
@@ -246,13 +227,9 @@ function TicketDetailContent({ params }: PageProps) {
                 setHasMoreActivity(Boolean(data.hasMoreActivity));
             }
         } catch (loadError) {
-            if (loadError instanceof DOMException && loadError.name === "AbortError") return;
             toast.error(loadError instanceof Error ? loadError.message : "Could not load older history");
         } finally {
-            if (historyControllerRef.current === controller) {
-                historyControllerRef.current = null;
-                setLoadingHistory(null);
-            }
+            setLoadingHistory(null);
         }
     }
 
@@ -317,6 +294,10 @@ function TicketDetailContent({ params }: PageProps) {
                 if (data.message) setMessages((current) => [...current, data.message]);
                 if (data.activityLog) setActivityLogs((current) => [data.activityLog, ...current]);
                 if (data.ticket) setTicket((current) => current ? { ...current, ...data.ticket } : current);
+                await queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+                await queryClient.invalidateQueries({ queryKey: ["tickets"] });
+                await queryClient.invalidateQueries({ queryKey: ["activity"] });
+                await queryClient.invalidateQueries({ queryKey: ["agent", "overview"] });
             }
         } catch {
             toast.error("Network error while posting message");

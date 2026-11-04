@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { StatCard } from "@/components/ui/stat-card";
 import { RadialGauge } from "@/components/ui/radial-gauge";
 import { Button } from "@/components/ui/button";
@@ -210,29 +212,25 @@ function CreateStaffModal({ onCreated }: { onCreated: () => void }) {
 export default function AdminOverviewPage() {
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
-    const [data, setData] = useState<AnalyticsData | null>(null);
-    const [loading, setLoading] = useState(true);
+    const queryClient = useQueryClient();
     const [syncing, setSyncing] = useState(false);
     const [assigningTicketId, setAssigningTicketId] = useState<string | null>(null);
 
-    const hasFetchedRef = useRef(false);
-
-    const fetchAnalytics = useCallback(async () => {
-        try {
-            const res = await fetch("/api/admin/analytics", { cache: "no-store" });
-            if (res.ok) {
-                const json = await res.json();
-                setData(json);
-            }
-        } catch (error) {
-            console.error("Admin analytics error:", error);
-            toast.error("Could not load command center analytics");
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
     const userRole = session?.user?.role;
+    const analyticsQuery = useQuery({
+        queryKey: ["admin", "analytics", session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<AnalyticsData>("/api/admin/analytics", { cache: "no-store", signal }),
+        enabled: sessionStatus === "authenticated" && userRole === "admin",
+    });
+    const data = analyticsQuery.data ?? null;
+    const loading = analyticsQuery.isPending;
+    const fetchAnalytics = () => analyticsQuery.refetch();
+
+    useEffect(() => {
+        if (analyticsQuery.isError) {
+            toast.error("Could not load command center analytics");
+        }
+    }, [analyticsQuery.isError, analyticsQuery.error]);
 
     useEffect(() => {
         if (sessionStatus === "loading") return;
@@ -248,12 +246,8 @@ export default function AdminOverviewPage() {
                 return;
             }
 
-            if (!hasFetchedRef.current) {
-                hasFetchedRef.current = true;
-                fetchAnalytics();
-            }
         }
-    }, [sessionStatus, userRole, router, fetchAnalytics]);
+    }, [sessionStatus, userRole, router]);
 
     async function handleManualSlaSync() {
         setSyncing(true);
@@ -282,18 +276,9 @@ export default function AdminOverviewPage() {
             if (!res.ok) throw new Error(resData.error || "Failed to assign engineer");
 
             toast.success("Incident assigned to support engineer!");
-            setData((prev) => {
-                if (!prev) return prev;
-                return {
-                    ...prev,
-                    unassignedTickets: prev.unassignedTickets.filter((t) => t._id !== ticketId),
-                    summary: {
-                        ...prev.summary,
-                        unassignedCount: Math.max(0, prev.summary.unassignedCount - 1),
-                    },
-                };
-            });
-            await fetchAnalytics();
+            await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
+            await queryClient.invalidateQueries({ queryKey: ["tickets", "admin"] });
+            await queryClient.invalidateQueries({ queryKey: ["activity"] });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Assignment failed";
             toast.error(msg);

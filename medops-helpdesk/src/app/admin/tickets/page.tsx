@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard-shell";
+import { fetchJson } from "@/lib/api-client";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,11 +57,7 @@ export default function AdminTicketsPage() {
     const { data: session, status: sessionStatus } = useSession();
     const router = useRouter();
 
-    const [tickets, setTickets] = useState<TicketRow[]>([]);
-    const [categories, setCategories] = useState<CategoryItem[]>([]);
-    const [agents, setAgents] = useState<AgentItem[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    const queryClient = useQueryClient();
 
     const [searchInput, setSearchInput] = useState("");
     const [search, setSearch] = useState("");
@@ -68,12 +66,6 @@ export default function AdminTicketsPage() {
     const [categoryFilter, setCategoryFilter] = useState("ALL");
     const [agentFilter, setAgentFilter] = useState("ALL");
     const [page, setPage] = useState(1);
-    const [pagination, setPagination] = useState({
-        page: 1,
-        limit: 10,
-        totalCount: 0,
-        totalPages: 1,
-    });
 
     // Debounce search to prevent query flooding
     useEffect(() => {
@@ -95,93 +87,35 @@ export default function AdminTicketsPage() {
         }
     }, [sessionStatus, session?.user?.role, router]);
 
-    const fetchTickets = useCallback(async () => {
-        try {
-            setLoading(true);
-            setError("");
-            const params = new URLSearchParams({
-                page: String(page),
-                limit: "10",
-            });
-            if (statusFilter !== "ALL") params.set("status", statusFilter);
-            if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
-            if (categoryFilter !== "ALL") params.set("category", categoryFilter);
-            if (agentFilter !== "ALL") params.set("assignedAgent", agentFilter);
-            if (search.trim()) params.set("search", search.trim());
-
-            const res = await fetch(`/api/tickets?${params.toString()}`);
-            const data = await res.json();
-
-            if (!res.ok) {
-                setError(data.error || "Failed to load tickets");
-            } else {
-                setTickets(data.tickets || []);
-                setPagination(data.pagination || { page: 1, limit: 10, totalCount: 0, totalPages: 1 });
-            }
-        } catch {
-            setError("Network error while fetching tickets. Click Refresh to retry.");
-        } finally {
-            setLoading(false);
-        }
-    }, [page, statusFilter, priorityFilter, categoryFilter, agentFilter, search]);
-
-    useEffect(() => {
-        if (sessionStatus !== "authenticated" || session?.user?.role !== "admin") return;
-
-        // Fetch categories & agents for filters and assignment
-        fetch("/api/categories")
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data?.categories) setCategories(data.categories);
-            })
-            .catch(() => { });
-
-        fetch("/api/users?role=agent")
-            .then((res) => (res.ok ? res.json() : null))
-            .then((data) => {
-                if (data?.users) setAgents(data.users);
-            })
-            .catch(() => { });
-    }, [sessionStatus, session?.user?.role]);
-
-    useEffect(() => {
-        if (sessionStatus !== "authenticated" || session?.user?.role !== "admin") return;
-        const controller = new AbortController();
-
-        const params = new URLSearchParams({
-            page: String(page),
-            limit: "10",
-        });
-        if (statusFilter !== "ALL") params.set("status", statusFilter);
-        if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
-        if (categoryFilter !== "ALL") params.set("category", categoryFilter);
-        if (agentFilter !== "ALL") params.set("assignedAgent", agentFilter);
-        if (search.trim()) params.set("search", search.trim());
-
-        fetch(`/api/tickets?${params.toString()}`, { signal: controller.signal })
-            .then(async (res) => {
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || "Failed to load tickets");
-                return data;
-            })
-            .then((data) => {
-                setTickets(data.tickets || []);
-                setPagination(data.pagination || { page: 1, limit: 10, totalCount: 0, totalPages: 1 });
-                setError("");
-            })
-            .catch((err: unknown) => {
-                if (err instanceof DOMException && err.name === "AbortError") return;
-                const msg = err instanceof Error ? err.message : "Network error while fetching tickets";
-                setError(msg);
-            })
-            .finally(() => {
-                if (!controller.signal.aborted) {
-                    setLoading(false);
-                }
-            });
-
-        return () => controller.abort();
-    }, [sessionStatus, session?.user?.role, page, statusFilter, priorityFilter, categoryFilter, agentFilter, search]);
+    const params = new URLSearchParams({ page: String(page), limit: "10" });
+    if (statusFilter !== "ALL") params.set("status", statusFilter);
+    if (priorityFilter !== "ALL") params.set("priority", priorityFilter);
+    if (categoryFilter !== "ALL") params.set("category", categoryFilter);
+    if (agentFilter !== "ALL") params.set("assignedAgent", agentFilter);
+    if (search.trim()) params.set("search", search.trim());
+    const isAdmin = sessionStatus === "authenticated" && session?.user?.role === "admin";
+    const ticketsQuery = useQuery({
+        queryKey: ["tickets", "admin", session?.user?.id, page, statusFilter, priorityFilter, categoryFilter, agentFilter, search.trim()],
+        queryFn: ({ signal }) => fetchJson<{ tickets: TicketRow[]; pagination: { page: number; limit: number; totalCount: number; totalPages: number } }>(`/api/tickets?${params.toString()}`, { signal }),
+        enabled: isAdmin,
+    });
+    const categoriesQuery = useQuery({
+        queryKey: ["categories"],
+        queryFn: ({ signal }) => fetchJson<{ categories: CategoryItem[] }>("/api/categories", { signal }),
+        enabled: isAdmin,
+    });
+    const agentsQuery = useQuery({
+        queryKey: ["users", "agents", session?.user?.id],
+        queryFn: ({ signal }) => fetchJson<{ users: AgentItem[] }>("/api/users?role=agent", { signal }),
+        enabled: isAdmin,
+    });
+    const tickets = ticketsQuery.data?.tickets ?? [];
+    const categories = categoriesQuery.data?.categories ?? [];
+    const agents = agentsQuery.data?.users ?? [];
+    const pagination = ticketsQuery.data?.pagination ?? { page: 1, limit: 10, totalCount: 0, totalPages: 1 };
+    const loading = ticketsQuery.isPending;
+    const error = ticketsQuery.error instanceof Error ? ticketsQuery.error.message : "";
+    const fetchTickets = () => ticketsQuery.refetch();
 
     async function handleAssign(ticketId: string, agentId: string) {
         setAssigningId(ticketId);
@@ -195,16 +129,9 @@ export default function AdminTicketsPage() {
             if (!res.ok) throw new Error(data.error || "Failed to assign agent");
 
             toast.success("Incident assigned successfully!");
-            // Update local state smoothly
-            setTickets((prev) =>
-                prev.map((t) => {
-                    if (t._id === ticketId) {
-                        const assigned = agents.find((a) => a._id === agentId) || null;
-                        return { ...t, assignedAgent: assigned };
-                    }
-                    return t;
-                })
-            );
+            await queryClient.invalidateQueries({ queryKey: ["tickets", "admin"] });
+            await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
+            await queryClient.invalidateQueries({ queryKey: ["activity"] });
         } catch (err: unknown) {
             const msg = err instanceof Error ? err.message : "Failed to assign";
             toast.error(msg);
