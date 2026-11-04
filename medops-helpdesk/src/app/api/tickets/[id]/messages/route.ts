@@ -8,34 +8,26 @@ import { ActivityLog } from "@/models/ActivityLog";
 import { User } from "@/models/User";
 import { createMessageSchema } from "@/lib/validations";
 import { sendTicketEmail } from "@/lib/mail";
+import { canAccessTicket } from "@/lib/ticket-access";
+import { isObjectId, jsonError, readJson, validationError } from "@/lib/http";
 
 interface RouteContext {
   params: Promise<{ id: string }>;
 }
 
+type Person = { _id: mongoose.Types.ObjectId; name: string; email: string } | null;
+
 export async function POST(req: NextRequest, context: RouteContext) {
   const { user, errorResponse } = await requireAuth();
-  if (errorResponse || !user) return errorResponse!;
+  if (!user) return errorResponse;
 
   const { id } = await context.params;
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return NextResponse.json({ error: "Invalid ticket ID" }, { status: 400 });
-  }
+  if (!isObjectId(id)) return jsonError("Invalid ticket ID", 400);
+
+  const parsed = createMessageSchema.safeParse(await readJson(req));
+  if (!parsed.success) return validationError(parsed.error);
 
   try {
-    const body = await req.json();
-    const parsed = createMessageSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          error: "Validation failed",
-          details: parsed.error.flatten().fieldErrors,
-        },
-        { status: 400 }
-      );
-    }
-
     await connectDB();
     void User;
 
@@ -43,117 +35,80 @@ export async function POST(req: NextRequest, context: RouteContext) {
       .populate("createdBy", "name email")
       .populate("assignedAgent", "name email");
 
-    if (!ticket) {
-      return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
-    }
+    if (!ticket || !canAccessTicket(user, ticket)) return jsonError("Ticket not found", 404);
+    if (ticket.status === "Closed") return jsonError("Closed tickets cannot receive new replies", 400);
 
-    const creatorId = ticket.createdBy._id.toString();
-    const agentId = ticket.assignedAgent?._id?.toString();
-
-    // Strict API Role Check
-    if (user.role === "user" && creatorId !== user.id) {
-      return NextResponse.json(
-        { error: "Forbidden: You cannot reply to another user's ticket" },
-        { status: 403 }
-      );
-    }
-
-    if (user.role === "agent" && agentId !== user.id) {
-      return NextResponse.json(
-        { error: "Forbidden: This ticket is not assigned to you" },
-        { status: 403 }
-      );
-    }
-
-    if (ticket.status === "Closed") {
-      return NextResponse.json(
-        { error: "Closed tickets cannot receive new replies" },
-        { status: 400 }
-      );
-    }
-
-    // Standard users can NEVER post internal notes
-    const isInternal =
-      user.role === "user" ? false : Boolean(parsed.data.isInternal);
+    // Requester kabhi internal note nahi bana sakta — chahe API ko direct call kare
+    const isInternal = user.role === "user" ? false : parsed.data.isInternal;
+    const isStaff = user.role === "agent" || user.role === "admin";
+    const now = new Date();
+    const previousStatus = ticket.status;
 
     const message = await Message.create({
       ticket: ticket._id,
       author: user.id,
       body: parsed.data.body,
-      attachments: parsed.data.attachments || [],
+      attachments: parsed.data.attachments,
       isInternal,
     });
 
-    const now = new Date();
-
-    // Update Ticket SLA & Status Lifecycle
-    if ((user.role === "agent" || user.role === "admin") && !isInternal) {
+    // ---- Lifecycle ----
+    if (isStaff && !isInternal) {
       if (!ticket.firstRespondedAt) {
         ticket.firstRespondedAt = now;
-        if (now > new Date(ticket.responseDueDate)) {
-          ticket.slaBreached = true;
-        }
+        if (now > new Date(ticket.responseDueDate)) ticket.slaBreached = true;
       }
-      if (ticket.status === "Open") {
-        ticket.status = "In Progress";
-      }
-    } else if (user.role === "user") {
-      // Agar user Resolved ya Waiting on User ticket par reply kare toh wapas In Progress kar do
-      if (
-        ticket.status === "Waiting on User" ||
-        ticket.status === "Resolved"
-      ) {
-        ticket.status = "In Progress";
-        ticket.resolvedAt = null;
-      }
+      if (ticket.status === "Open") ticket.status = "In Progress";
+    } else if (user.role === "user" && (ticket.status === "Waiting on User" || ticket.status === "Resolved")) {
+      // User ka reply ticket ko dobara active kar deta hai (aur auto-close ruk jata hai)
+      ticket.status = "In Progress";
+      ticket.resolvedAt = null;
     }
-
     await ticket.save();
 
-    const activityLog = await ActivityLog.create({
-      ticket: ticket._id,
-      actor: user.id,
-      action: isInternal ? "INTERNAL_NOTE_ADDED" : "REPLY_POSTED",
-      details: isInternal
-        ? `${user.name} added an internal staff note`
-        : `${user.name} (${user.role}) posted a reply`,
-    });
+    const logs = [
+      {
+        ticket: ticket._id,
+        actor: user.id,
+        action: isInternal ? "INTERNAL_NOTE_ADDED" : "REPLY_POSTED",
+        details: isInternal ? "Added an internal note" : `Posted a reply`,
+      },
+    ];
+    if (previousStatus !== ticket.status) {
+      logs.push({
+        ticket: ticket._id,
+        actor: user.id,
+        action: "STATUS_CHANGED",
+        details: `Status changed from ${previousStatus} to ${ticket.status}`,
+      });
+    }
+    await ActivityLog.insertMany(logs);
 
-    // Send Email Notification (Sirf public reply par, internal note par nahi)
+    // ---- Email (internal notes par kabhi nahi) ----
     if (!isInternal) {
-      const creator = ticket.createdBy as unknown as {
-        email: string;
-        name: string;
+      const creator = ticket.createdBy as unknown as Person;
+      const agent = ticket.assignedAgent as unknown as Person;
+      const base = {
+        ticketNumber: ticket.ticketNumber,
+        title: ticket.title,
+        ticketId: ticket._id.toString(),
+        bodyText: parsed.data.body.slice(0, 1500),
+        status: ticket.status,
+        priority: ticket.priority,
       };
-      const agent = ticket.assignedAgent as unknown as {
-        email: string;
-        name: string;
-      } | null;
-
       if (user.role === "user" && agent?.email) {
         await sendTicketEmail({
+          ...base,
           to: agent.email,
-          subject: `New Requester Reply on ${ticket.ticketNumber}`,
-          ticketNumber: ticket.ticketNumber,
-          title: ticket.title,
-          headline: `${user.name} replied to ${ticket.ticketNumber}`,
-          bodyText: parsed.data.body,
-          status: ticket.status,
-          priority: ticket.priority,
+          subject: `New reply from requester on ${ticket.ticketNumber}`,
+          headline: `${user.name} replied`,
         });
-      } else if (
-        (user.role === "agent" || user.role === "admin") &&
-        creator?.email
-      ) {
+      } else if (isStaff && creator?.email && creator._id.toString() !== user.id) {
         await sendTicketEmail({
+          ...base,
           to: creator.email,
-          subject: `Update on your ticket ${ticket.ticketNumber}`,
-          ticketNumber: ticket.ticketNumber,
-          title: ticket.title,
-          headline: `Support Engineer ${user.name} replied to your ticket`,
-          bodyText: parsed.data.body,
-          status: ticket.status,
-          priority: ticket.priority,
+          subject: `New reply on your ticket ${ticket.ticketNumber}`,
+          headline: `${user.name} from support replied to your ticket`,
         });
       }
     }
@@ -162,25 +117,11 @@ export async function POST(req: NextRequest, context: RouteContext) {
       {
         message: {
           _id: message._id,
-          ticket: message.ticket,
           body: message.body,
           attachments: message.attachments,
           isInternal: message.isInternal,
           createdAt: message.createdAt,
-          author: {
-            _id: user.id,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            facility: user.facility,
-          },
-        },
-        activityLog: {
-          _id: activityLog._id,
-          action: activityLog.action,
-          details: activityLog.details,
-          createdAt: activityLog.createdAt,
-          actor: { name: user.name, role: user.role },
+          author: { _id: user.id, name: user.name, role: user.role },
         },
         ticket: {
           status: ticket.status,
@@ -189,13 +130,10 @@ export async function POST(req: NextRequest, context: RouteContext) {
           slaBreached: ticket.slaBreached,
         },
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("POST /api/tickets/[id]/messages error:", error);
-    return NextResponse.json(
-      { error: "Failed to post message" },
-      { status: 500 }
-    );
+    return jsonError("Failed to post message", 500);
   }
 }

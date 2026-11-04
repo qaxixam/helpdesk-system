@@ -1,5 +1,7 @@
 import dotenv from "dotenv";
+// .env.local (agar ho) pehle, phir .env — dono support
 dotenv.config({ path: ".env.local" });
+dotenv.config({ path: ".env" });
 
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
@@ -8,7 +10,8 @@ import { Category } from "../models/Category";
 import { Ticket } from "../models/Ticket";
 import { Message } from "../models/Message";
 import { ActivityLog } from "../models/ActivityLog";
-import { calculateSLADates, TicketPriority, TicketStatus } from "../lib/sla";
+import { calculateSLADates, isSLABreached, TicketPriority, TicketStatus } from "../lib/sla";
+import { Counter } from "../models/Counter";
 
 const MONGODB_URI = process.env.MONGODB_URI;
 
@@ -29,6 +32,7 @@ async function seed() {
             Ticket.deleteMany({}),
             Message.deleteMany({}),
             ActivityLog.deleteMany({}),
+            Counter.deleteMany({}),
         ]);
 
         const hashedPassword = await bcrypt.hash("Password123!", 10);
@@ -371,7 +375,10 @@ async function seed() {
                 firstRespondedAt,
                 resolvedAt,
                 closedAt,
-                slaBreached: Boolean(item.forceBreach),
+                // Breach flag asal SLA rules se calculate hota hai (hard-coded nahi)
+                slaBreached:
+                    Boolean(item.forceBreach) ||
+                    isSLABreached({ status: item.status, responseDueDate, resolutionDueDate, firstRespondedAt, resolvedAt }),
                 createdAt,
                 updatedAt: resolvedAt || firstRespondedAt || createdAt,
             });
@@ -418,6 +425,13 @@ async function seed() {
                 });
             }
         }
+
+        // Ticket number counter ko seed ke baad set karo taake naye tickets TKT-0016 se shuru hon
+        await Counter.findOneAndUpdate(
+            { _id: "ticketNumber" },
+            { $set: { seq: sampleTicketsData.length } },
+            { upsert: true }
+        );
 
         console.log("\n🎉 MedOps Database Seeded Successfully!");
         console.log("--------------------------------------------------");

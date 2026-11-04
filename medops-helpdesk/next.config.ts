@@ -1,20 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  // Keep dev memory use lower; this app does not currently use Cache Components.
+  reactStrictMode: true,
   cacheComponents: false,
-  partialPrefetching: false,
-  reactStrictMode: false,
-  experimental: {
-    // Defer loading route modules until a request needs them to lower startup RAM.
-    preloadEntriesOnStart: false,
+  poweredByHeader: false,
+  // Run `npm run typecheck` before deploying. Kept on so a stray type error in the seed
+  // script can't block a Vercel build; the app code is type-checked separately.
+  typescript: { ignoreBuildErrors: true },
+  images: {
+    remotePatterns: [{ protocol: "https", hostname: "res.cloudinary.com" }],
   },
-  typescript: {
-    // Type checking is validated directly with standalone tsc with custom heap
-    ignoreBuildErrors: true,
-  },
-  
+  // Tailwind v4 is compiled through the Turbopack loader used by this project
   turbopack: {
     rules: {
       "*.css": {
@@ -22,6 +18,18 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+  async headers() {
+    return [
+      {
+        source: "/(.*)",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
+      },
+    ];
   },
 };
 

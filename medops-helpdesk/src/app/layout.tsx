@@ -1,34 +1,35 @@
-import type { Metadata } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Instrument_Sans, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 
-const plusJakartaSans = Plus_Jakarta_Sans({
+const instrument = Instrument_Sans({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
-  variable: "--font-sans",
+  variable: "--font-instrument",
+  display: "swap",
+});
+
+const plexMono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-plex-mono",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "MedOps IT Helpdesk",
-  description: "B2B Healthcare IT Incident & Operations Support System",
+  title: { default: "MedOps Helpdesk", template: "%s · MedOps Helpdesk" },
+  description: "IT support desk for clinics: raise tickets, track SLAs, resolve faster.",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export const viewport: Viewport = {
+  themeColor: "#0f1f1e",
+};
+
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body
-        suppressHydrationWarning
-        className={`${plusJakartaSans.variable} min-h-screen bg-[#F4F6FB] font-sans text-slate-900 antialiased overflow-x-hidden max-w-full w-full selection:bg-purple-500 selection:text-white`}
-      >
-        <Providers>
-          {children}
-        </Providers>
+    <html lang="en" className={`${instrument.variable} ${plexMono.variable}`}>
+      <body className="min-h-dvh">
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

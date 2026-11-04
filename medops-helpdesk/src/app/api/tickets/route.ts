@@ -5,175 +5,153 @@ import { Ticket } from "@/models/Ticket";
 import { Category } from "@/models/Category";
 import { User } from "@/models/User";
 import { ActivityLog } from "@/models/ActivityLog";
-import { createTicketSchema } from "@/lib/validations";
+import { nextTicketNumber } from "@/models/Counter";
+import { createTicketSchema, PRIORITIES, STATUSES } from "@/lib/validations";
 import { calculateSLADates } from "@/lib/sla";
 import { sendTicketEmail } from "@/lib/mail";
+import { maybeSyncLifecycle } from "@/lib/ticket-lifecycle";
+import {
+  escapeRegex,
+  isObjectId,
+  jsonError,
+  paginationMeta,
+  parsePagination,
+  readJson,
+  validationError,
+} from "@/lib/http";
 
 export async function GET(req: NextRequest) {
-    const { user, errorResponse } = await requireAuth();
-    if (errorResponse || !user) return errorResponse!;
+  const { user, errorResponse } = await requireAuth();
+  if (!user) return errorResponse;
 
-    try {
-        await connectDB();
-        // Ensure Category & User models are registered before populate
-        void Category;
-        void User;
+  try {
+    await connectDB();
+    await maybeSyncLifecycle();
+    void Category;
+    void User;
 
-        const { searchParams } = new URL(req.url);
-        const page = Math.max(1, Number(searchParams.get("page")) || 1);
-        const limit = Math.min(50, Math.max(1, Number(searchParams.get("limit")) || 8));
-        const status = searchParams.get("status");
-        const priority = searchParams.get("priority");
-        const category = searchParams.get("category");
-        const search = searchParams.get("search")?.trim();
-        const breached = searchParams.get("breached");
+    const { searchParams } = new URL(req.url);
+    const { page, limit, skip } = parsePagination(searchParams, 10);
+    const status = searchParams.get("status");
+    const priority = searchParams.get("priority");
+    const category = searchParams.get("category");
+    const search = searchParams.get("search")?.trim().slice(0, 100);
+    const breached = searchParams.get("breached");
+    const scope = searchParams.get("scope"); // "active" = sirf open/in-progress/waiting
 
-        // STRICT ROLE-BASED DATA ISOLATION
-        const query: Record<string, unknown> = {};
-
-        if (user.role === "user") {
-            query.createdBy = user.id;
-        } else if (user.role === "agent") {
-            query.assignedAgent = user.id;
-        }
-        // Admin sees all tickets (and can optionally filter by assignedAgent)
-        if (user.role === "admin" && searchParams.get("assignedAgent")) {
-            const agentParam = searchParams.get("assignedAgent");
-            query.assignedAgent = agentParam === "unassigned" ? null : agentParam;
-        }
-
-        if (status && status !== "ALL") query.status = status;
-        if (priority && priority !== "ALL") query.priority = priority;
-        if (category && category !== "ALL") query.category = category;
-        if (breached === "true") query.slaBreached = true;
-
-        if (search) {
-            const safeRegex = new RegExp(
-                search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-                "i"
-            );
-            query.$or = [{ ticketNumber: safeRegex }, { title: safeRegex }];
-        }
-
-        const skip = (page - 1) * limit;
-
-        const [tickets, totalCount] = await Promise.all([
-            Ticket.find(query)
-                .populate("category", "name defaultPriority")
-                .populate("createdBy", "name email facility")
-                .populate("assignedAgent", "name email facility")
-                .sort({ createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
-            Ticket.countDocuments(query),
-        ]);
-
-        return NextResponse.json({
-            tickets,
-            pagination: {
-                page,
-                limit,
-                totalCount,
-                totalPages: Math.max(1, Math.ceil(totalCount / limit)),
-            },
-        });
-    } catch (error) {
-        console.error("GET /api/tickets error:", error);
-        return NextResponse.json(
-            { error: "Failed to fetch tickets" },
-            { status: 500 }
-        );
+    // ROLE-BASED DATA ISOLATION — yeh filter server par lagta hai, client isay bypass nahi kar sakta
+    const query: Record<string, unknown> = {};
+    if (user.role === "user") {
+      query.createdBy = user.id;
+    } else if (user.role === "agent") {
+      query.assignedAgent = user.id;
+    } else {
+      const agentParam = searchParams.get("assignedAgent");
+      if (agentParam === "unassigned") query.assignedAgent = null;
+      else if (isObjectId(agentParam)) query.assignedAgent = agentParam;
     }
+
+    if (status && (STATUSES as readonly string[]).includes(status)) query.status = status;
+    else if (scope === "active") query.status = { $in: ["Open", "In Progress", "Waiting on User"] };
+    if (priority && (PRIORITIES as readonly string[]).includes(priority)) query.priority = priority;
+    if (isObjectId(category)) query.category = category;
+    if (breached === "true") query.slaBreached = true;
+
+    if (search) {
+      const rx = new RegExp(escapeRegex(search), "i");
+      query.$or = [{ ticketNumber: rx }, { title: rx }];
+    }
+
+    const [tickets, totalCount] = await Promise.all([
+      Ticket.find(query)
+        .select("-description -attachments")
+        .populate("category", "name defaultPriority")
+        .populate("createdBy", "name email facility")
+        .populate("assignedAgent", "name email facility")
+        .sort({ createdAt: -1, _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Ticket.countDocuments(query),
+    ]);
+
+    return NextResponse.json({ tickets, pagination: paginationMeta(page, limit, totalCount) });
+  } catch (error) {
+    console.error("GET /api/tickets error:", error);
+    return jsonError("Failed to fetch tickets", 500);
+  }
 }
 
 export async function POST(req: NextRequest) {
-    const { user, errorResponse } = await requireAuth(["user", "admin"]);
-    if (errorResponse || !user) return errorResponse!;
+  // Tickets requesters (users) banate hain; admin bhi kisi ki taraf se bana sakta hai
+  const { user, errorResponse } = await requireAuth(["user", "admin"]);
+  if (!user) return errorResponse;
 
-    try {
-        const body = await req.json();
-        const parsed = createTicketSchema.safeParse(body);
+  const parsed = createTicketSchema.safeParse(await readJson(req));
+  if (!parsed.success) return validationError(parsed.error);
 
-        if (!parsed.success) {
-            return NextResponse.json(
-                {
-                    error: "Validation failed",
-                    details: parsed.error.flatten().fieldErrors,
-                },
-                { status: 400 }
-            );
-        }
+  try {
+    await connectDB();
 
-        await connectDB();
+    const categoryDoc = await Category.findById(parsed.data.category).select("name").lean();
+    if (!categoryDoc) return jsonError("Selected category does not exist", 400);
 
-        const categoryDoc = await Category.findById(parsed.data.category);
-        if (!categoryDoc) {
-            return NextResponse.json(
-                { error: "Selected category does not exist" },
-                { status: 400 }
-            );
-        }
+    const ticketNumber = await nextTicketNumber();
+    const now = new Date();
+    const { responseDueDate, resolutionDueDate } = calculateSLADates(parsed.data.priority, now);
 
-        // Auto-generate next sequential ticket number (e.g. TKT-0017)
-        const lastTicket = await Ticket.findOne()
-            .sort({ ticketNumber: -1 })
-            .select("ticketNumber")
-            .lean();
+    const ticket = await Ticket.create({
+      ticketNumber,
+      title: parsed.data.title,
+      description: parsed.data.description,
+      category: parsed.data.category,
+      priority: parsed.data.priority,
+      status: "Open",
+      createdBy: user.id,
+      assignedAgent: null,
+      attachments: parsed.data.attachments,
+      responseDueDate,
+      resolutionDueDate,
+      slaBreached: false,
+    });
 
-        let nextNum = 1;
-        if (lastTicket?.ticketNumber) {
-            const match = lastTicket.ticketNumber.match(/TKT-(\d+)/);
-            if (match) nextNum = parseInt(match[1], 10) + 1;
-        }
-        const ticketNumber = `TKT-${String(nextNum).padStart(4, "0")}`;
+    await ActivityLog.create({
+      ticket: ticket._id,
+      actor: user.id,
+      action: "TICKET_CREATED",
+      details: `Created ticket ${ticketNumber} (${parsed.data.priority} priority, ${categoryDoc.name})`,
+    });
 
-        const now = new Date();
-        const { responseDueDate, resolutionDueDate } = calculateSLADates(
-            parsed.data.priority,
-            now
-        );
+    // Notifications: requester ko confirmation + admins ko naya ticket (assign karne ke liye)
+    const admins = await User.find({ role: "admin", isActive: true }).select("email").lean();
+    await Promise.allSettled([
+      sendTicketEmail({
+        to: user.email,
+        subject: `Ticket received: ${ticket.title}`,
+        ticketNumber,
+        title: ticket.title,
+        headline: "We received your support ticket",
+        bodyText: `Your ticket has been logged with ${parsed.data.priority} priority. Our first-response target is ${responseDueDate.toUTCString()}.`,
+        status: "Open",
+        priority: parsed.data.priority,
+        ticketId: ticket._id.toString(),
+      }),
+      sendTicketEmail({
+        to: admins.map((a) => a.email).filter((e) => e !== user.email),
+        subject: `New ticket needs assignment: ${ticket.title}`,
+        ticketNumber,
+        title: ticket.title,
+        headline: `New ${parsed.data.priority} ticket from ${user.name}`,
+        bodyText: parsed.data.description.slice(0, 500),
+        status: "Open",
+        priority: parsed.data.priority,
+        ticketId: ticket._id.toString(),
+      }),
+    ]);
 
-        const newTicket = await Ticket.create({
-            ticketNumber,
-            title: parsed.data.title,
-            description: parsed.data.description,
-            category: parsed.data.category,
-            priority: parsed.data.priority,
-            status: "Open",
-            createdBy: user.id,
-            assignedAgent: null,
-            attachments: parsed.data.attachments || [],
-            responseDueDate,
-            resolutionDueDate,
-            slaBreached: false,
-        });
-
-        await ActivityLog.create({
-            ticket: newTicket._id,
-            actor: user.id,
-            action: "TICKET_CREATED",
-            details: `Created ticket ${ticketNumber} (${parsed.data.priority} Priority)`,
-        });
-
-        // Send email notification to the user
-        sendTicketEmail({
-            to: user.email || "",
-            subject: `Incident Logged: ${newTicket.title}`,
-            ticketNumber,
-            title: newTicket.title,
-            headline: "Your clinical support ticket has been logged",
-            bodyText: `We have received your incident report and calculated your SLA targets based on ${parsed.data.priority} priority.`,
-            status: "Open",
-            priority: parsed.data.priority,
-        });
-
-        return NextResponse.json({ ticket: newTicket }, { status: 201 });
-    } catch (error) {
-        console.error("POST /api/tickets error:", error);
-        return NextResponse.json(
-            { error: "Failed to create ticket" },
-            { status: 500 }
-        );
-    }
+    return NextResponse.json({ ticket: { _id: ticket._id, ticketNumber } }, { status: 201 });
+  } catch (error) {
+    console.error("POST /api/tickets error:", error);
+    return jsonError("Failed to create ticket", 500);
+  }
 }

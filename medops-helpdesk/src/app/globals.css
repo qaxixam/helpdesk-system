@@ -1,165 +1,138 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * MedOps "Ward" design system
+ * ---------------------------------------------------------------
+ * Subject: a hospital IT helpdesk. The vernacular is the ward —
+ * triage colours, monitor read-outs, chart paper. Surfaces are cool
+ * clinical whites, ink is a deep scrubs green, the action colour is
+ * surgical teal. Triage colours are reserved for priority & SLA only,
+ * so red/amber always mean "time matters".
+ */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-ring: var(--ring);
-  --color-input: var(--input);
-  --color-border: var(--border);
-  --color-destructive: var(--destructive);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-accent: var(--accent);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-muted: var(--muted);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-secondary: var(--secondary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-primary: var(--primary);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-popover: var(--popover);
-  --color-card-foreground: var(--card-foreground);
-  --color-card: var(--card);
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+@theme {
+  /* Typography */
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* Neutrals — cool, faintly green */
+  --color-canvas: #f4f6f4;
+  --color-surface: #ffffff;
+  --color-sunken: #eef1ef;
+  --color-line: #dfe5e2;
+  --color-line-strong: #c7d0cc;
+  --color-ink: #13201f;
+  --color-ink-2: #3f4d4b;
+  --color-ink-3: #6b7876;
+  --color-ink-4: #97a29f;
+
+  /* Brand */
+  --color-teal-50: #ecf7f5;
+  --color-teal-100: #cfeae5;
+  --color-teal-200: #a1d6cd;
+  --color-teal-500: #16897e;
+  --color-teal-600: #0e6e66;
+  --color-teal-700: #0b5752;
+  --color-teal-900: #0a2f2d;
+
+  /* Sidebar */
+  --color-ward: #0f1f1e;
+  --color-ward-2: #172b29;
+  --color-ward-3: #22403d;
+  --color-ward-ink: #c9d6d3;
+
+  /* Triage (priority + SLA only) */
+  --color-urgent: #c8372a;
+  --color-urgent-soft: #fbeae8;
+  --color-high: #c2701a;
+  --color-high-soft: #fbf0e3;
+  --color-medium: #2d64b8;
+  --color-medium-soft: #e8eff9;
+  --color-low: #5d6b69;
+  --color-low-soft: #eef1f0;
+
+  /* Status */
+  --color-ok: #1f8a4c;
+  --color-ok-soft: #e5f4ea;
+  --color-warn: #b7791f;
+  --color-warn-soft: #fbf3e2;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-pop: 0 12px 32px -8px rgb(15 31 30 / 0.18), 0 2px 6px -2px rgb(15 31 30 / 0.08);
+  --shadow-raise: 0 1px 2px rgb(15 31 30 / 0.05);
+
+  --animate-sweep: sweep 1.6s ease-in-out infinite;
+  --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
 }
 
-:root {
-  --background: #f4f6fb;
-  --foreground: #1e293b;
-  --card: #ffffff;
-  --card-foreground: #1e293b;
-  --popover: #ffffff;
-  --popover-foreground: #1e293b;
-  --primary: #6052e9;
-  --primary-foreground: #ffffff;
-  --secondary: #f1f4f9;
-  --secondary-foreground: #1e293b;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #f1f4f9;
-  --accent-foreground: #1e293b;
-  --destructive: #ef4444;
-  --border: #e2e8f0;
-  --input: #e2e8f0;
-  --ring: #6052e9;
-  --chart-1: #00d2b4;
-  --chart-2: #6052e9;
-  --chart-3: #3b82f6;
-  --chart-4: #00c975;
-  --chart-5: #ff5b60;
-  --radius: 0.75rem;
-  --sidebar: #141738;
-  --sidebar-foreground: #e2e8f0;
-  --sidebar-primary: #6052e9;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #23274f;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #1f244e;
-  --sidebar-ring: #6052e9;
+@keyframes sweep {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
-.dark {
-  --background: #0d1026;
-  --foreground: #f8fafc;
-  --card: #151837;
-  --card-foreground: #f8fafc;
-  --popover: #151837;
-  --popover-foreground: #f8fafc;
-  --primary: #6e5ff5;
-  --primary-foreground: #ffffff;
-  --secondary: #1c2146;
-  --secondary-foreground: #f8fafc;
-  --muted: #1c2146;
-  --muted-foreground: #94a3b8;
-  --accent: #1c2146;
-  --accent-foreground: #f8fafc;
-  --destructive: #f87171;
-  --border: #23274f;
-  --input: #23274f;
-  --ring: #6e5ff5;
-  --chart-1: #00d2b4;
-  --chart-2: #6e5ff5;
-  --chart-3: #38bdf8;
-  --chart-4: #00c975;
-  --chart-5: #ff5b60;
-  --sidebar: #0f122b;
-  --sidebar-foreground: #f8fafc;
-  --sidebar-primary: #6e5ff5;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #1e224d;
-  --sidebar-accent-foreground: #ffffff;
-  --sidebar-border: #1a1e42;
-  --sidebar-ring: #6e5ff5;
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 @layer base {
-  *,
-  *::before,
-  *::after {
-    @apply border-border outline-ring/50;
-    box-sizing: border-box;
+  *, *::before, *::after {
+    border-color: var(--color-line);
   }
   html {
-    @apply font-sans;
-    overflow-x: hidden;
-    max-width: 100vw;
-    width: 100%;
+    -webkit-text-size-adjust: 100%;
   }
   body {
-    @apply bg-background text-foreground;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
     overflow-x: hidden;
-    max-width: 100vw;
-    width: 100%;
-    position: relative;
+  }
+  ::selection {
+    background: var(--color-teal-200);
+    color: var(--color-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-teal-500);
+    outline-offset: 2px;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-/* Custom Design System Utilities matching the Performance Dashboard */
-.bg-brand-purple {
-  background: linear-gradient(135deg, #5b4fe9 0%, #6852f6 50%, #7b54f9 100%);
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
-.bg-brand-sidebar {
-  background-color: #141738;
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(90deg, var(--color-sunken) 25%, #e4e9e6 50%, var(--color-sunken) 75%);
+  background-size: 200% 100%;
+  animation: var(--animate-sweep);
+  border-radius: var(--radius-sm);
 }
 
-.bg-brand-emerald {
-  background-color: #00d084;
+/* Chart-paper grid used behind the dashboard vitals strip */
+.chart-paper {
+  background-image:
+    linear-gradient(to right, rgb(22 137 126 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(22 137 126 / 0.07) 1px, transparent 1px);
+  background-size: 16px 16px;
 }
 
-.bg-brand-emerald:hover {
-  background-color: #00bc76;
-}
-
-.shadow-baligo {
-  box-shadow: 0 4px 20px -2px rgba(20, 23, 56, 0.05), 0 2px 6px -2px rgba(20, 23, 56, 0.03);
-}
-
-.shadow-baligo-lg {
-  box-shadow: 0 10px 30px -4px rgba(20, 23, 56, 0.08);
+/* Thin scrollbar for side panels */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
 }

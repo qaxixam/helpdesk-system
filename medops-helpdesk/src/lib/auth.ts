@@ -1,21 +1,29 @@
-import NextAuth from "next-auth";
+import NextAuth, { CredentialsSignin } from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import bcrypt from "bcryptjs";
+import mongoose from "mongoose";
 import { NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { User, UserRole } from "@/models/User";
 import { loginSchema } from "@/lib/validations";
 
+class InvalidLogin extends CredentialsSignin {
+  code = "invalid_credentials";
+}
+class InactiveAccount extends CredentialsSignin {
+  code = "account_disabled";
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   trustHost: true,
-  session: { strategy: "jwt" },
-  // Keep Auth.js and the route guard on the same cookie name even if a stale
-  // NEXTAUTH_URL setting points at localhost on the deployed environment.
+  session: { strategy: "jwt", maxAge: 60 * 60 * 24 * 7 },
+  // Auth.js aur proxy (route guard) dono same cookie name use karein
   cookies: {
     sessionToken: {
-      name: process.env.NODE_ENV === "production"
-        ? "__Secure-authjs.session-token"
-        : "authjs.session-token",
+      name:
+        process.env.NODE_ENV === "production"
+          ? "__Secure-authjs.session-token"
+          : "authjs.session-token",
       options: {
         httpOnly: true,
         sameSite: "lax",
@@ -24,9 +32,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     },
   },
-  pages: {
-    signIn: "/login",
-  },
+  pages: { signIn: "/login" },
   providers: [
     Credentials({
       name: "Credentials",
@@ -36,25 +42,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
       async authorize(credentials) {
         const parsed = loginSchema.safeParse(credentials);
-        if (!parsed.success) return null;
+        if (!parsed.success) throw new InvalidLogin();
 
         await connectDB();
-        const user = await User.findOne({
-          email: parsed.data.email.toLowerCase(),
-        });
+        const user = await User.findOne({ email: parsed.data.email.toLowerCase() });
 
-        if (!user || !user.isActive) {
-          throw new Error("Invalid credentials or account deactivated.");
-        }
-
-        const isPasswordValid = await bcrypt.compare(
-          parsed.data.password,
-          user.password
-        );
-
-        if (!isPasswordValid) {
-          return null;
-        }
+        // Same error for unknown email & wrong password (no account enumeration)
+        if (!user) throw new InvalidLogin();
+        const ok = await bcrypt.compare(parsed.data.password, user.password);
+        if (!ok) throw new InvalidLogin();
+        if (!user.isActive) throw new InactiveAccount();
 
         return {
           id: user._id.toString(),
@@ -86,35 +83,64 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   },
 });
 
+export interface AuthedUser {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  facility?: string;
+}
+
+type AuthResult =
+  | { user: AuthedUser; errorResponse: null }
+  | { user: null; errorResponse: NextResponse };
+
 /**
- * Server-side API Role Guard (Bilkul Express middleware ki tarah)
- * Agar user login nahi hai -> 401 Unauthorized
- * Agar user ka role allowed nahi hai -> 403 Forbidden
+ * Server-side API guard (Express middleware jaisa).
+ * - JWT verify karta hai
+ * - Phir DB se user dobara load karta hai: deactivated users aur role changes
+ *   foran enforce hote hain (purane token par trust nahi kiya jata)
+ * - 401 = login nahi, 403 = role allowed nahi
  */
-export async function requireAuth(allowedRoles?: UserRole[]) {
+export async function requireAuth(allowedRoles?: UserRole[]): Promise<AuthResult> {
   const session = await auth();
+  const sessionId = session?.user?.id;
 
-  if (!session || !session.user) {
+  if (!sessionId || !mongoose.Types.ObjectId.isValid(sessionId)) {
+    return {
+      user: null,
+      errorResponse: NextResponse.json({ error: "Unauthorized: Authentication required" }, { status: 401 }),
+    };
+  }
+
+  await connectDB();
+  const dbUser = await User.findById(sessionId).select("name email role facility isActive").lean();
+
+  if (!dbUser || !dbUser.isActive) {
+    return {
+      user: null,
+      errorResponse: NextResponse.json({ error: "Unauthorized: Account is inactive" }, { status: 401 }),
+    };
+  }
+
+  if (allowedRoles && !allowedRoles.includes(dbUser.role)) {
     return {
       user: null,
       errorResponse: NextResponse.json(
-        { error: "Unauthorized: Authentication required" },
-        { status: 401 }
+        { error: `Forbidden: Requires ${allowedRoles.join(" or ")} role` },
+        { status: 403 },
       ),
     };
   }
 
-  if (allowedRoles && !allowedRoles.includes(session.user.role)) {
-    return {
-      user: null,
-      errorResponse: NextResponse.json(
-        {
-          error: `Forbidden: Requires ${allowedRoles.join(" or ")} privileges`,
-        },
-        { status: 403 }
-      ),
-    };
-  }
-
-  return { user: session.user, errorResponse: null };
+  return {
+    user: {
+      id: dbUser._id.toString(),
+      name: dbUser.name,
+      email: dbUser.email,
+      role: dbUser.role,
+      facility: dbUser.facility,
+    },
+    errorResponse: null,
+  };
 }

@@ -1,286 +1,254 @@
 "use client";
 
-import { useState } from "react";
-import { createTicketSchema } from "@/lib/validations";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-    Dialog,
-    DialogContent,
-    DialogDescription,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FileText, Loader2, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
-import { Plus, Paperclip, X, Loader2 } from "lucide-react";
+import { fetchJson } from "@/lib/api-client";
+import { createTicketSchema, PRIORITIES } from "@/lib/validations";
+import { SLA_RULES, type TicketPriority } from "@/lib/sla";
+import type { Attachment, CategoryRow } from "@/lib/types";
+import { Modal } from "@/components/ui/primitives";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { cn } from "@/lib/utils";
 
-interface CategoryOption {
-    _id: string;
-    name: string;
-    description: string;
-    defaultPriority: "Low" | "Medium" | "High" | "Urgent";
+const MAX_FILES = 3;
+const MAX_BYTES = 4 * 1024 * 1024;
+
+export async function uploadFile(file: File): Promise<Attachment> {
+  if (file.size > MAX_BYTES) throw new Error(`${file.name} is larger than 4 MB`);
+  const body = new FormData();
+  body.append("file", file);
+  const data = await fetchJson<{ attachment: Attachment }>("/api/upload", { method: "POST", body });
+  return data.attachment;
 }
 
-interface AttachmentItem {
-    name: string;
-    url: string;
-    publicId?: string;
-}
-
-export function CreateTicketModal({
-    categories = [],
-    onCreated,
-    triggerText = "Create Ticket",
-    triggerClassName,
+export function AttachmentPicker({
+  files,
+  onChange,
+  disabled,
 }: {
-    categories: CategoryOption[];
-    onCreated: () => void;
-    triggerText?: string;
-    triggerClassName?: string;
+  files: Attachment[];
+  onChange: (files: Attachment[]) => void;
+  disabled?: boolean;
 }) {
-    const [open, setOpen] = useState(false);
-    const [title, setTitle] = useState("");
-    const [description, setDescription] = useState("");
-    const [category, setCategory] = useState<string | undefined>(undefined);
-    const [priority, setPriority] = useState<"Low" | "Medium" | "High" | "Urgent">("Medium");
-    const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-    const [uploading, setUploading] = useState(false);
-    const [submitting, setSubmitting] = useState(false);
-    const [errors, setErrors] = useState<Record<string, string>>({});
+  const input = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(0);
 
-    function handleCategoryChange(catId: string) {
-        setCategory(catId);
-        const found = categories.find((c) => c._id === catId);
-        if (found?.defaultPriority) {
-            setPriority(found.defaultPriority);
-        }
+  async function pick(list: FileList | null) {
+    if (!list?.length) return;
+    const room = MAX_FILES - files.length;
+    const chosen = Array.from(list).slice(0, room);
+    if (list.length > room) toast.error(`You can attach up to ${MAX_FILES} files`);
+    setUploading(chosen.length);
+    const done: Attachment[] = [];
+    for (const f of chosen) {
+      try {
+        done.push(await uploadFile(f));
+      } catch (e) {
+        toast.error((e as Error).message);
+      } finally {
+        setUploading((n) => n - 1);
+      }
     }
+    onChange([...files, ...done]);
+    if (input.current) input.current.value = "";
+  }
 
-    async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-        const files = e.target.files;
-        if (!files || files.length === 0) return;
-
-        if (attachments.length + files.length > 3) {
-            toast.error("Maximum 3 attachments allowed");
-            return;
-        }
-
-        setUploading(true);
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            const formData = new FormData();
-            formData.append("file", file);
-
-            try {
-                const res = await fetch("/api/upload", {
-                    method: "POST",
-                    body: formData,
-                });
-                const data = await res.json();
-                if (!res.ok) {
-                    toast.error(data.error || `Failed to upload ${file.name}`);
-                } else {
-                    setAttachments((prev) => [
-                        ...prev,
-                        { name: data.name, url: data.url, publicId: data.publicId },
-                    ]);
-                }
-            } catch {
-                toast.error(`Error uploading ${file.name}`);
-            }
-        }
-        setUploading(false);
-        e.target.value = "";
-    }
-
-    function removeAttachment(index: number) {
-        setAttachments((prev) => prev.filter((_, i) => i !== index));
-    }
-
-    async function handleSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setErrors({});
-
-        const parsed = createTicketSchema.safeParse({
-            title,
-            description,
-            category,
-            priority,
-            attachments,
-        });
-
-        if (!parsed.success) {
-            const fieldErrors = parsed.error.flatten().fieldErrors;
-            setErrors({
-                title: fieldErrors.title?.[0] || "",
-                description: fieldErrors.description?.[0] || "",
-                category: fieldErrors.category?.[0] || "",
-                priority: fieldErrors.priority?.[0] || "",
-            });
-            return;
-        }
-
-        setSubmitting(true);
-        try {
-            const res = await fetch("/api/tickets", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(parsed.data),
-            });
-
-            const data = await res.json();
-
-            if (!res.ok) {
-                toast.error(data.error || "Failed to submit ticket");
-                setSubmitting(false);
-                return;
-            }
-
-            toast.success(`Incident ${data.ticket.ticketNumber} created!`);
-            setTitle("");
-            setDescription("");
-            setCategory(undefined);
-            setPriority("Medium");
-            setAttachments([]);
-            setOpen(false);
-            onCreated();
-
-        } catch (error) {
-            console.error("Submit error:", error);
-            toast.error("Network timeout. Please try again.");
-        } finally {
-            setSubmitting(false);
-        }
-    }
-
-    return (
-        <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger
-                className={
-                    triggerClassName ||
-                    "h-10 px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
-                }
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        {files.map((f, i) => (
+          <span
+            key={f.url}
+            className="inline-flex h-8 max-w-[220px] items-center gap-1.5 rounded-md border border-line bg-sunken pl-2.5 pr-1 text-[12.5px] text-ink-2"
+          >
+            <FileText className="size-3.5 shrink-0 text-ink-3" />
+            <span className="truncate">{f.name}</span>
+            <button
+              type="button"
+              onClick={() => onChange(files.filter((_, j) => j !== i))}
+              className="rounded p-1 text-ink-3 hover:bg-line hover:text-ink"
+              aria-label={`Remove ${f.name}`}
             >
-                <Plus className="h-4 w-4" />
-                {triggerText}
-            </DialogTrigger>
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        {uploading > 0 && (
+          <span className="inline-flex h-8 items-center gap-1.5 px-2 text-[12.5px] text-ink-3">
+            <Loader2 className="size-3.5 animate-spin" /> Uploading…
+          </span>
+        )}
+        {files.length + uploading < MAX_FILES && (
+          <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => input.current?.click()}>
+            <Paperclip /> Attach file
+          </Button>
+        )}
+      </div>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        hidden
+        accept="image/*,.pdf,.txt,.csv,.doc,.docx,.xls,.xlsx"
+        onChange={(e) => pick(e.target.files)}
+      />
+    </div>
+  );
+}
 
-            <DialogContent className="sm:max-w-lg">
-                <DialogHeader>
-                    <DialogTitle className="text-lg font-bold text-slate-900">Report Clinical IT Incident</DialogTitle>
-                    <DialogDescription className="text-xs text-slate-500">
-                        SLA timers start immediately. Urgent incidents carry a 1h response target.
-                    </DialogDescription>
-                </DialogHeader>
+type Errors = Partial<Record<"title" | "description" | "category" | "priority" | "attachments", string>>;
 
-                <form onSubmit={handleSubmit} className="space-y-4 mt-2">
-                    <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-700">Incident Summary</Label>
-                        <Input
-                            placeholder="Epic EHR timeout in Room 2"
-                            value={title}
-                            onChange={(e) => setTitle(e.target.value)}
-                            disabled={submitting}
-                            className="rounded-xl"
-                        />
-                        {errors.title && <p className="text-[11px] text-rose-600 font-medium">{errors.title}</p>}
-                    </div>
+export function CreateTicketModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState({ title: "", description: "", category: "", priority: "Medium" as TicketPriority });
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [errors, setErrors] = useState<Errors>({});
+  const [saving, setSaving] = useState(false);
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-700">System Category</Label>
-                            <Select value={category} onValueChange={(val) => { if (val) handleCategoryChange(val); }} disabled={submitting}>
-                                <SelectTrigger className="w-full rounded-xl">
-                                    <SelectValue placeholder={categories.length === 0 ? "Loading..." : "Select category"} />
-                                </SelectTrigger>
-                                <SelectContent className="z-[9999]">
-                                    {categories.map((c) => (
-                                        <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                            {errors.category && <p className="text-[11px] text-rose-600 font-medium">{errors.category}</p>}
-                        </div>
+  const categories = useQuery({
+    queryKey: ["categories"],
+    queryFn: ({ signal }) => fetchJson<{ categories: CategoryRow[] }>("/api/categories", { signal }),
+    enabled: open,
+    staleTime: 5 * 60_000,
+  });
 
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-700">Impact Priority</Label>
-                            <Select value={priority} onValueChange={(val) => { if (val) setPriority(val as "Low" | "Medium" | "High" | "Urgent"); }} disabled={submitting}>
-                                <SelectTrigger className="w-full rounded-xl"><SelectValue /></SelectTrigger>
-                                <SelectContent className="z-[9999]">
-                                    <SelectItem value="Low">Low (24h/72h)</SelectItem>
-                                    <SelectItem value="Medium">Medium (8h/48h)</SelectItem>
-                                    <SelectItem value="High">High (4h/24h)</SelectItem>
-                                    <SelectItem value="Urgent">Urgent (1h/8h)</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
+  function reset() {
+    setForm({ title: "", description: "", category: "", priority: "Medium" });
+    setFiles([]);
+    setErrors({});
+  }
 
-                    <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-slate-700">Detailed Impact</Label>
-                        <Textarea
-                            rows={4}
-                            placeholder="Describe error message and clinical impact..."
-                            value={description}
-                            onChange={(e) => setDescription(e.target.value)}
-                            disabled={submitting}
-                            className="rounded-xl"
-                        />
-                        {errors.description && <p className="text-[11px] text-rose-600 font-medium">{errors.description}</p>}
-                    </div>
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    // Client-side Zod validation (same schema the API uses)
+    const parsed = createTicketSchema.safeParse({ ...form, attachments: files });
+    if (!parsed.success) {
+      const fe = parsed.error.flatten().fieldErrors;
+      setErrors(Object.fromEntries(Object.entries(fe).map(([k, v]) => [k, v?.[0]])) as Errors);
+      return;
+    }
+    setErrors({});
+    setSaving(true);
+    try {
+      const data = await fetchJson<{ ticket: { _id: string; ticketNumber: string } }>("/api/tickets", {
+        method: "POST",
+        body: JSON.stringify(parsed.data),
+      });
+      toast.success(`Ticket ${data.ticket.ticketNumber} created`);
+      void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      void queryClient.invalidateQueries({ queryKey: ["overview"] });
+      reset();
+      onClose();
+      router.push(`/tickets/${data.ticket._id}`);
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
 
-                    <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                            <Label className="text-xs font-semibold text-slate-700">Attachments ({attachments.length}/3)</Label>
-                            {attachments.length < 3 && (
-                                <label className={`cursor-pointer inline-flex items-center gap-1.5 text-xs font-semibold ${submitting ? 'text-slate-400' : 'text-[#6052E9] hover:underline'}`}>
-                                    {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
-                                    <span>{uploading ? "Uploading..." : "Attach File"}</span>
-                                    <input
-                                        type="file"
-                                        accept="image/*,.pdf,.txt,.log"
-                                        onChange={handleFileUpload}
-                                        disabled={uploading || submitting}
-                                        className="hidden"
-                                    />
-                                </label>
-                            )}
-                        </div>
+  const rule = SLA_RULES[form.priority];
 
-                        {attachments.length > 0 && (
-                            <div className="space-y-1.5">
-                                {attachments.map((att, idx) => (
-                                    <div key={idx} className="flex items-center justify-between px-2.5 py-1.5 rounded-xl bg-slate-100 border text-xs">
-                                        <span className="truncate max-w-[320px] font-mono">{att.name}</span>
-                                        <button type="button" onClick={() => removeAttachment(idx)} disabled={submitting} className="text-slate-400 hover:text-rose-600">
-                                            <X className="h-3.5 w-3.5" />
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="New support ticket"
+      description="Tell us what’s wrong. The more detail, the faster we can fix it."
+      size="lg"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="create-ticket" loading={saving}>
+            Create ticket
+          </Button>
+        </>
+      }
+    >
+      <form id="create-ticket" onSubmit={submit} className="space-y-5" noValidate>
+        <Field label="Title" htmlFor="t-title" error={errors.title}>
+          <Input
+            id="t-title"
+            value={form.title}
+            maxLength={150}
+            aria-invalid={!!errors.title}
+            placeholder="e.g. Lab results not syncing to patient charts"
+            onChange={(e) => setForm({ ...form, title: e.target.value })}
+            autoFocus
+          />
+        </Field>
 
-                    <div className="flex justify-end gap-2 pt-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => setOpen(false)} disabled={submitting} className="rounded-xl">
-                            Cancel
-                        </Button>
-                        <Button type="submit" size="sm" disabled={submitting || uploading} className="bg-[#00D084] hover:bg-[#00BC76] text-white rounded-xl font-bold">
-                            {submitting ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Submitting...</> : "Submit Incident"}
-                        </Button>
-                    </div>
-                </form>
-            </DialogContent>
-        </Dialog>
-    );
+        <div className="grid gap-5 sm:grid-cols-2">
+          <Field label="Category" htmlFor="t-cat" error={errors.category}>
+            <Select
+              id="t-cat"
+              value={form.category}
+              aria-invalid={!!errors.category}
+              onChange={(e) => {
+                const cat = categories.data?.categories.find((c) => c._id === e.target.value);
+                setForm({ ...form, category: e.target.value, priority: cat?.defaultPriority ?? form.priority });
+              }}
+            >
+              <option value="">{categories.isPending ? "Loading…" : "Choose a category"}</option>
+              {categories.data?.categories.map((c) => (
+                <option key={c._id} value={c._id}>
+                  {c.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Priority" error={errors.priority}>
+            <div className="grid grid-cols-4 gap-1 rounded-md border border-line-strong p-1" role="radiogroup" aria-label="Priority">
+              {PRIORITIES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  role="radio"
+                  aria-checked={form.priority === p}
+                  onClick={() => setForm({ ...form, priority: p })}
+                  className={cn(
+                    "h-8 rounded-[5px] text-[12.5px] font-medium transition-colors",
+                    form.priority === p
+                      ? {
+                          Urgent: "bg-urgent text-white",
+                          High: "bg-high text-white",
+                          Medium: "bg-medium text-white",
+                          Low: "bg-low text-white",
+                        }[p]
+                      : "text-ink-2 hover:bg-sunken",
+                  )}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </Field>
+        </div>
+        <p className="-mt-2 text-[12.5px] text-ink-3">
+          {form.priority} tickets get a first response within {rule.responseHours}h and a fix within {rule.resolutionHours}h.
+        </p>
+
+        <Field label="Description" htmlFor="t-desc" error={errors.description} hint="What happened, where, and who is affected.">
+          <Textarea
+            id="t-desc"
+            rows={6}
+            value={form.description}
+            aria-invalid={!!errors.description}
+            onChange={(e) => setForm({ ...form, description: e.target.value })}
+          />
+        </Field>
+
+        <Field label="Attachments" error={errors.attachments} hint="Up to 3 files, 4 MB each. Screenshots help.">
+          <AttachmentPicker files={files} onChange={setFiles} disabled={saving} />
+        </Field>
+      </form>
+    </Modal>
+  );
 }

@@ -2,52 +2,53 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { Category } from "@/models/Category";
+import { Ticket } from "@/models/Ticket";
 import { categorySchema } from "@/lib/validations";
+import { escapeRegex, jsonError, readJson, validationError } from "@/lib/http";
 
+/** Sab logged-in users ko categories chahiye (ticket form ke liye). Admin ko ticket counts bhi milte hain. */
 export async function GET() {
-    const { errorResponse } = await requireAuth();
-    if (errorResponse) return errorResponse;
+  const { user, errorResponse } = await requireAuth();
+  if (!user) return errorResponse;
 
-    try {
-        await connectDB();
-        const categories = await Category.find().sort({ name: 1 }).lean();
-        return NextResponse.json({ categories });
-    } catch (error) {
-        console.error("GET /api/categories error:", error);
-        return NextResponse.json({ error: "Failed to fetch categories" }, { status: 500 });
-    }
+  try {
+    await connectDB();
+    const categories = await Category.find().sort({ name: 1 }).limit(200).lean();
+
+    if (user.role !== "admin") return NextResponse.json({ categories });
+
+    const counts = await Ticket.aggregate<{ _id: unknown; count: number }>([
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+    ]);
+    const byId = new Map(counts.map((c) => [String(c._id), c.count]));
+    return NextResponse.json({
+      categories: categories.map((c) => ({ ...c, ticketCount: byId.get(c._id.toString()) || 0 })),
+    });
+  } catch (error) {
+    console.error("GET /api/categories error:", error);
+    return jsonError("Failed to fetch categories", 500);
+  }
 }
 
 export async function POST(req: NextRequest) {
-    // Strict check: Only Admins can create new categories
-    const { errorResponse } = await requireAuth(["admin"]);
-    if (errorResponse) return errorResponse;
+  const { user, errorResponse } = await requireAuth(["admin"]);
+  if (!user) return errorResponse;
 
-    try {
-        const body = await req.json();
-        const parsed = categorySchema.safeParse(body);
+  const parsed = categorySchema.safeParse(await readJson(req));
+  if (!parsed.success) return validationError(parsed.error);
 
-        if (!parsed.success) {
-            return NextResponse.json(
-                { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
-                { status: 400 }
-            );
-        }
+  try {
+    await connectDB();
+    // Regex input escape kiya gaya hai (pehle raw user input RegExp mein ja raha tha)
+    const exists = await Category.exists({
+      name: { $regex: new RegExp(`^${escapeRegex(parsed.data.name)}$`, "i") },
+    });
+    if (exists) return jsonError("A category with this name already exists", 409);
 
-        await connectDB();
-
-        const exists = await Category.findOne({
-            name: { $regex: new RegExp(`^${parsed.data.name}$`, "i") },
-        });
-
-        if (exists) {
-            return NextResponse.json({ error: "Category already exists" }, { status: 409 });
-        }
-
-        const category = await Category.create(parsed.data);
-        return NextResponse.json({ category }, { status: 201 });
-    } catch (error) {
-        console.error("POST /api/categories error:", error);
-        return NextResponse.json({ error: "Failed to create category" }, { status: 500 });
-    }
+    const category = await Category.create(parsed.data);
+    return NextResponse.json({ category }, { status: 201 });
+  } catch (error) {
+    console.error("POST /api/categories error:", error);
+    return jsonError("Failed to create category", 500);
+  }
 }

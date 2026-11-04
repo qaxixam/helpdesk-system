@@ -38,7 +38,7 @@ const AttachmentSchema = new Schema<IAttachment>(
 
 const TicketSchema = new Schema<ITicket>(
     {
-        ticketNumber: { type: String, required: true, unique: true, index: true },
+        ticketNumber: { type: String, required: true, unique: true },
         title: { type: String, required: true, trim: true },
         description: { type: String, required: true },
         category: {
@@ -89,6 +89,8 @@ const TicketSchema = new Schema<ITicket>(
 TicketSchema.index({ createdBy: 1, createdAt: -1 });
 TicketSchema.index({ assignedAgent: 1, createdAt: -1 });
 TicketSchema.index({ status: 1, createdAt: -1 });
+TicketSchema.index({ status: 1, resolvedAt: 1 }); // auto-close job
+TicketSchema.index({ slaBreached: 1, status: 1 }); // SLA job
 
 export const Ticket: Model<ITicket> =
     mongoose.models.Ticket || mongoose.model<ITicket>("Ticket", TicketSchema);

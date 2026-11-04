@@ -36,7 +36,9 @@ export async function proxy(request: NextRequest) {
         if (role === "admin" && (pathname === "/dashboard" || pathname.startsWith("/dashboard/"))) {
             return NextResponse.redirect(new URL("/admin", request.url));
         }
-        if (role === "admin" && (pathname === "/tickets" || pathname.startsWith("/tickets/"))) {
+        // Sirf list page redirect hota hai — ticket detail (/tickets/:id) admin ke liye bhi shared page hai.
+        // (Pehle /tickets/:id → /admin/tickets/:id redirect hota tha jo exist hi nahi karta tha → 404)
+        if (role === "admin" && pathname === "/tickets") {
             const adminTicketsUrl = new URL("/admin/tickets", request.url);
             adminTicketsUrl.search = search;
             return NextResponse.redirect(adminTicketsUrl);

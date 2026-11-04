@@ -3,65 +3,37 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { User } from "@/models/User";
 import { registerSchema } from "@/lib/validations";
+import { jsonError, readJson, validationError } from "@/lib/http";
 
 export async function POST(req: NextRequest) {
+  const parsed = registerSchema.safeParse(await readJson(req));
+  if (!parsed.success) return validationError(parsed.error);
+
   try {
-    const body = await req.json();
-
-    // Server-side Zod Validation
-    const parsed = registerSchema.safeParse(body);
-    if (!parsed.success) {
-      return NextResponse.json(
-        {
-          error: "Validation failed",
-          details: parsed.error.flatten().fieldErrors,
-        },
-        { status: 400 }
-      );
-    }
-
     await connectDB();
+    const email = parsed.data.email.toLowerCase();
+    if (await User.exists({ email })) return jsonError("An account with this email already exists", 409);
 
-    const existingUser = await User.findOne({
-      email: parsed.data.email.toLowerCase(),
-    });
-
-    if (existingUser) {
-      return NextResponse.json(
-        { error: "An account with this email already exists" },
-        { status: 409 }
-      );
-    }
-
-    const hashedPassword = await bcrypt.hash(parsed.data.password, 10);
-
-    // Security: Public registration se hamesha "user" role hi banega, koi khud ko admin nahi bana sakta
-    const newUser = await User.create({
+    // Public registration se hamesha "user" role hi banta hai — role body se kabhi nahi liya jata
+    const created = await User.create({
       name: parsed.data.name,
-      email: parsed.data.email.toLowerCase(),
-      password: hashedPassword,
+      email,
+      password: await bcrypt.hash(parsed.data.password, 12),
       role: "user",
       facility: parsed.data.facility,
       isActive: true,
     });
 
     return NextResponse.json(
-      {
-        message: "Account created successfully",
-        user: {
-          id: newUser._id.toString(),
-          name: newUser.name,
-          email: newUser.email,
-          role: newUser.role,
-        },
-      },
-      { status: 201 }
+      { message: "Account created", user: { id: created._id.toString(), name: created.name, email: created.email } },
+      { status: 201 },
     );
   } catch (error) {
+    // Race condition: do requests same email ke sath — unique index error
+    if (typeof error === "object" && error && "code" in error && (error as { code: number }).code === 11000) {
+      return jsonError("An account with this email already exists", 409);
+    }
     console.error("Registration error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return jsonError("Internal server error", 500);
   }
 }

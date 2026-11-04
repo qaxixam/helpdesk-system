@@ -3,103 +3,152 @@ import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { requireAuth } from "@/lib/auth";
 import { User } from "@/models/User";
+import { Ticket } from "@/models/Ticket";
+import { ActivityLog } from "@/models/ActivityLog";
+import { createStaffSchema, ROLES, updateUserSchema } from "@/lib/validations";
+import {
+  escapeRegex,
+  jsonError,
+  paginationMeta,
+  parsePagination,
+  readJson,
+  validationError,
+} from "@/lib/http";
 
+/** Admin: users/agents list (paginated + search + role filter) */
 export async function GET(req: NextRequest) {
-    const { errorResponse } = await requireAuth(["admin"]);
-    if (errorResponse) return errorResponse;
+  const { user, errorResponse } = await requireAuth(["admin"]);
+  if (!user) return errorResponse;
 
+  try {
     await connectDB();
     const { searchParams } = new URL(req.url);
-    const roleFilter = searchParams.get("role");
+    const { page, limit, skip } = parsePagination(searchParams, 10, 100);
+    const role = searchParams.get("role");
+    const search = searchParams.get("search")?.trim().slice(0, 80);
+    const active = searchParams.get("active");
 
     const query: Record<string, unknown> = {};
-    if (roleFilter && roleFilter !== "ALL") {
-        query.role = roleFilter;
+    if (role && (ROLES as readonly string[]).includes(role)) query.role = role;
+    if (active === "true") query.isActive = true;
+    if (search) {
+      const rx = new RegExp(escapeRegex(search), "i");
+      query.$or = [{ name: rx }, { email: rx }];
     }
 
-    const users = await User.find(query)
-        .select("-password")
-        .sort({ role: 1, name: 1 })
-        .lean();
+    const [users, totalCount] = await Promise.all([
+      User.find(query).select("-password").sort({ role: 1, name: 1 }).skip(skip).limit(limit).lean(),
+      User.countDocuments(query),
+    ]);
 
-    return NextResponse.json({ users });
+    return NextResponse.json({ users, pagination: paginationMeta(page, limit, totalCount) });
+  } catch (error) {
+    console.error("GET /api/users error:", error);
+    return jsonError("Failed to load users", 500);
+  }
 }
 
+/** Admin: role change / activate / deactivate */
 export async function PATCH(req: NextRequest) {
-    const { user: adminUser, errorResponse } = await requireAuth(["admin"]);
-    if (errorResponse || !adminUser) return errorResponse!;
+  const { user: admin, errorResponse } = await requireAuth(["admin"]);
+  if (!admin) return errorResponse;
 
-    try {
-        const { userId, role, isActive } = await req.json();
+  const parsed = updateUserSchema.safeParse(await readJson(req));
+  if (!parsed.success) return validationError(parsed.error);
+  const { userId, role, isActive } = parsed.data;
 
-        if (!userId) {
-            return NextResponse.json({ error: "userId is required" }, { status: 400 });
-        }
+  // Admin khud ko lock-out na kar le
+  if (userId === admin.id) return jsonError("You cannot change your own role or status", 400);
 
-        await connectDB();
-        const targetUser = await User.findById(userId);
-        if (!targetUser) {
-            return NextResponse.json({ error: "User not found" }, { status: 404 });
-        }
+  try {
+    await connectDB();
+    const target = await User.findById(userId);
+    if (!target) return jsonError("User not found", 404);
 
-        if (role && ["user", "agent", "admin"].includes(role)) {
-            targetUser.role = role;
-        }
-        if (typeof isActive === "boolean") {
-            targetUser.isActive = isActive;
-        }
+    const wasAgent = target.role === "agent" && target.isActive;
+    if (role) target.role = role;
+    if (typeof isActive === "boolean") target.isActive = isActive;
+    await target.save();
 
-        await targetUser.save();
-
-        return NextResponse.json({
-            user: {
-                _id: targetUser._id,
-                name: targetUser.name,
-                email: targetUser.email,
-                role: targetUser.role,
-                isActive: targetUser.isActive,
-            },
-        });
-    } catch (error) {
-        console.error("PATCH /api/users error:", error);
-        return NextResponse.json(
-            { error: "Failed to update user" },
-            { status: 500 }
+    // Agar agent ab agent nahi raha (ya deactivate hua), us ke active tickets unassign kar do
+    // taake woh queue mein phanse na rahein aur admin dobara assign kar sake
+    let unassigned = 0;
+    if (wasAgent && (target.role !== "agent" || !target.isActive)) {
+      const orphaned = await Ticket.find({
+        assignedAgent: target._id,
+        status: { $nin: ["Resolved", "Closed"] },
+      })
+        .select("_id")
+        .lean();
+      if (orphaned.length) {
+        await Ticket.updateMany({ _id: { $in: orphaned.map((t) => t._id) } }, { $set: { assignedAgent: null } });
+        await ActivityLog.insertMany(
+          orphaned.map((t) => ({
+            ticket: t._id,
+            actor: admin.id,
+            action: "UNASSIGNED",
+            details: `Unassigned because ${target.name} is no longer an active agent`,
+          })),
         );
+        unassigned = orphaned.length;
+      }
     }
+
+    return NextResponse.json({
+      user: {
+        _id: target._id,
+        name: target.name,
+        email: target.email,
+        role: target.role,
+        isActive: target.isActive,
+      },
+      unassignedTickets: unassigned,
+    });
+  } catch (error) {
+    console.error("PATCH /api/users error:", error);
+    return jsonError("Failed to update user", 500);
+  }
 }
 
+/** Admin: naya staff account (agent / admin / user) banana */
 export async function POST(req: NextRequest) {
-    // 🚨 SECURITY TEMPORARILY DISABLED FOR BOOTSTRAPPING
+  // Pehle yeh route bina auth ke khula tha — koi bhi khud ko admin bana sakta tha
+  const { user: admin, errorResponse } = await requireAuth(["admin"]);
+  if (!admin) return errorResponse;
 
-    try {
-        const { name, email, password, role, facility } = await req.json();
+  const parsed = createStaffSchema.safeParse(await readJson(req));
+  if (!parsed.success) return validationError(parsed.error);
 
-        if (!name || !email || !password || !role) {
-            return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-        }
+  try {
+    await connectDB();
+    const email = parsed.data.email.toLowerCase();
+    if (await User.exists({ email })) return jsonError("An account with this email already exists", 409);
 
-        await connectDB();
+    const created = await User.create({
+      name: parsed.data.name,
+      email,
+      password: await bcrypt.hash(parsed.data.password, 12),
+      role: parsed.data.role,
+      facility: parsed.data.facility || "Support HQ",
+      isActive: true,
+    });
 
-        const existingUser = await User.findOne({ email: email.toLowerCase() });
-        if (existingUser) {
-            // Agar pehle se bana hua hai toh bataye
-            return NextResponse.json({ error: "Yeh email pehle se database mein mojood hai!" }, { status: 409 });
-        }
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        const newUser = await User.create({
-            name,
-            email: email.toLowerCase(),
-            password: hashedPassword,
-            role, // "admin" yahan pass ho jayega
-            facility: facility || "IT Headquarters",
-        });
-
-        return NextResponse.json({ message: "Success! Admin ban gaya hai.", user: newUser.email }, { status: 201 });
-    } catch (error) {
-        console.error("Admin creation error:", error);
-        return NextResponse.json({ error: "Failed to create admin" }, { status: 500 });
-    }
+    return NextResponse.json(
+      {
+        user: {
+          _id: created._id,
+          name: created.name,
+          email: created.email,
+          role: created.role,
+          isActive: created.isActive,
+          facility: created.facility,
+          createdAt: created.createdAt,
+        },
+      },
+      { status: 201 },
+    );
+  } catch (error) {
+    console.error("POST /api/users error:", error);
+    return jsonError("Failed to create user", 500);
+  }
 }

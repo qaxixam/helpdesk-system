@@ -1,143 +1,102 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { registerSchema } from "@/lib/validations";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { signIn } from "next-auth/react";
 import { toast } from "sonner";
-import { UserPlus } from "lucide-react";
+import { AuthLayout } from "@/components/auth-layout";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/field";
+import { registerSchema } from "@/lib/validations";
+import { fetchJson } from "@/lib/api-client";
+
+type Form = { name: string; email: string; facility: string; password: string };
+type Errors = Partial<Record<keyof Form | "form", string>>;
 
 export default function RegisterPage() {
-    const router = useRouter();
-    const [form, setForm] = useState({ name: "", email: "", password: "", facility: "" });
-    const [errors, setErrors] = useState<Record<string, string>>({});
-    const [loading, setLoading] = useState(false);
+  const [form, setForm] = useState<Form>({ name: "", email: "", facility: "", password: "" });
+  const [errors, setErrors] = useState<Errors>({});
+  const [loading, setLoading] = useState(false);
 
-    async function handleSubmit(e: React.FormEvent) {
-        e.preventDefault();
-        setErrors({});
+  const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
 
-        const parsed = registerSchema.safeParse({
-            ...form,
-            facility: form.facility || "Main Medical Center"
-        });
-
-        if (!parsed.success) {
-            const fieldErrors = parsed.error.flatten().fieldErrors;
-            setErrors({
-                name: fieldErrors.name?.[0] || "",
-                email: fieldErrors.email?.[0] || "",
-                password: fieldErrors.password?.[0] || "",
-                facility: fieldErrors.facility?.[0] || "",
-            });
-            return;
-        }
-
-        setLoading(true);
-        const res = await fetch("/api/auth/register", {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed.data),
-        });
-        const data = await res.json();
-        setLoading(false);
-
-        if (!res.ok) {
-            toast.error(data.error || "Registration failed");
-            return;
-        }
-
-        toast.success("Account created successfully. Please sign in.");
-        router.replace("/login");
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = registerSchema.safeParse(form);
+    if (!parsed.success) {
+      const fe = parsed.error.flatten().fieldErrors;
+      setErrors(Object.fromEntries(Object.entries(fe).map(([k, v]) => [k, v?.[0]])) as Errors);
+      return;
     }
+    setErrors({});
+    setLoading(true);
+    try {
+      await fetchJson("/api/auth/register", { method: "POST", body: JSON.stringify(parsed.data) });
+      const res = await signIn("credentials", { email: parsed.data.email, password: parsed.data.password, redirect: false });
+      if (res?.error) {
+        toast.success("Account created. Please sign in.");
+        window.location.assign("/login");
+        return;
+      }
+      window.location.assign("/dashboard");
+    } catch (err) {
+      setErrors({ form: (err as Error).message });
+      setLoading(false);
+    }
+  }
 
-    return (
-        <div className="min-h-screen flex w-full bg-[#F4F6FB] font-sans">
-            {/* Left Minimal Brand Panel */}
-            <div className="hidden lg:flex w-1/2 bg-[#141738] items-center justify-center flex-col p-12 relative overflow-hidden">
-                <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-[#6052E9]/20 blur-3xl pointer-events-none" />
-                <div className="absolute -bottom-24 -right-24 w-96 h-96 rounded-full bg-[#00D2B4]/15 blur-3xl pointer-events-none" />
+  return (
+    <AuthLayout>
+      <h1 className="text-[28px] font-semibold tracking-[-0.015em] text-ink">Create your account</h1>
+      <p className="mt-1.5 text-[14.5px] text-ink-3">For clinic and department staff who need IT support.</p>
 
-                <div className="relative z-10 flex flex-col items-center text-center max-w-sm">
-                    <div className="flex items-center gap-2 mb-6">
-                        <span className="w-4 h-4 rounded-full bg-[#FFB020] inline-block shadow-sm" />
-                        <span className="w-4 h-4 rounded-full bg-[#00D2B4] inline-block shadow-sm" />
-                        <span className="w-4 h-4 rounded-full bg-[#FF5630] inline-block shadow-sm" />
-                    </div>
-                    <h1 className="text-3xl font-extrabold tracking-tight text-white mb-3">
-                        Join MedOps
-                    </h1>
-                    <p className="text-sm text-slate-300 font-normal leading-relaxed">
-                        Register your clinical facility and start managing your healthcare IT incidents seamlessly.
-                    </p>
-                </div>
-            </div>
+      <form onSubmit={submit} className="mt-8 space-y-5" noValidate>
+        {errors.form && (
+          <div className="rounded-md border border-urgent/25 bg-urgent-soft px-3.5 py-2.5 text-[13.5px] text-urgent" role="alert">
+            {errors.form}
+          </div>
+        )}
+        <Field label="Full name" htmlFor="name" error={errors.name}>
+          <Input id="name" autoComplete="name" value={form.name} onChange={set("name")} aria-invalid={!!errors.name} />
+        </Field>
+        <Field label="Work email" htmlFor="email" error={errors.email}>
+          <Input id="email" type="email" autoComplete="email" value={form.email} onChange={set("email")} aria-invalid={!!errors.email} />
+        </Field>
+        <Field label="Clinic or department" htmlFor="facility" error={errors.facility}>
+          <Input
+            id="facility"
+            placeholder="e.g. St. Jude Outpatient – ER"
+            value={form.facility}
+            onChange={set("facility")}
+            aria-invalid={!!errors.facility}
+          />
+        </Field>
+        <Field
+          label="Password"
+          htmlFor="password"
+          error={errors.password}
+          hint="At least 8 characters, with an uppercase letter and a number."
+        >
+          <Input
+            id="password"
+            type="password"
+            autoComplete="new-password"
+            value={form.password}
+            onChange={set("password")}
+            aria-invalid={!!errors.password}
+          />
+        </Field>
+        <Button type="submit" size="lg" className="w-full" loading={loading}>
+          Create account
+        </Button>
+      </form>
 
-            {/* Right Register Form */}
-            <div className="w-full lg:w-1/2 flex items-center justify-center px-6 py-12">
-                <div className="w-full max-w-sm space-y-6 bg-white p-8 sm:p-10 rounded-2xl shadow-baligo border border-slate-100">
-                    <div className="lg:hidden flex flex-col items-center mb-6">
-                        <div className="flex items-center gap-2 mb-3">
-                            <span className="w-3 h-3 rounded-full bg-[#FFB020]" />
-                            <span className="w-3 h-3 rounded-full bg-[#00D2B4]" />
-                            <span className="w-3 h-3 rounded-full bg-[#FF5630]" />
-                        </div>
-                        <h1 className="text-xl font-bold text-slate-900">MedOps Helpdesk</h1>
-                    </div>
-
-                    <div>
-                        <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Create an account</h2>
-                        <p className="text-xs text-slate-400 mt-1">Register to submit support incidents.</p>
-                    </div>
-
-                    <form onSubmit={handleSubmit} className="space-y-4">
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-700">Full Name</Label>
-                            <Input
-                                placeholder="Dr. Sarah Jenkins" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })}
-                                className="h-10 text-xs rounded-xl"
-                            />
-                            {errors.name && <p className="text-[11px] text-rose-600 font-medium">{errors.name}</p>}
-                        </div>
-
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-700">Facility / Clinic</Label>
-                            <Input
-                                placeholder="Radiology Wing / General Hospital" value={form.facility} onChange={(e) => setForm({ ...form, facility: e.target.value })}
-                                className="h-10 text-xs rounded-xl"
-                            />
-                        </div>
-
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-700">Work Email</Label>
-                            <Input
-                                type="email" placeholder="sarah@hospital.org" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
-                                className="h-10 text-xs rounded-xl"
-                            />
-                            {errors.email && <p className="text-[11px] text-rose-600 font-medium">{errors.email}</p>}
-                        </div>
-
-                        <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-slate-700">Password</Label>
-                            <Input
-                                type="password" placeholder="••••••••" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })}
-                                className="h-10 text-xs rounded-xl"
-                            />
-                            {errors.password && <p className="text-[11px] text-rose-600 font-medium">{errors.password}</p>}
-                        </div>
-
-                        <Button type="submit" disabled={loading} className="w-full h-10 bg-[#6052E9] hover:bg-[#4F46E5] text-white rounded-xl font-semibold shadow-sm transition-all mt-2">
-                            <UserPlus className="h-4 w-4 mr-2" />
-                            {loading ? "Creating account..." : "Register"}
-                        </Button>
-                    </form>
-
-                    <p className="text-center text-xs text-slate-400 pt-2 border-t border-slate-100">
-                        Already have an account? <Link href="/login" className="text-[#6052E9] font-bold hover:underline">Sign in</Link>
-                    </p>
-                </div>
-            </div>
-        </div>
-    );
+      <p className="mt-6 text-center text-[13.5px] text-ink-3">
+        Already have an account?{" "}
+        <Link href="/login" className="font-medium text-teal-700 hover:underline">
+          Sign in
+        </Link>
+      </p>
+    </AuthLayout>
+  );
 }

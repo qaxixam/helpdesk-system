@@ -1,1021 +1,501 @@
 "use client";
 
-import { useEffect, useState, use, Suspense } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import Link from "next/link";
-import { DashboardShell } from "@/components/dashboard-shell";
-import { fetchJson } from "@/lib/api-client";
-import { SLACountdown } from "@/components/sla-countdown";
-import { TicketDetailSkeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { useParams } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { format, formatDistanceToNowStrict } from "date-fns";
+import { ArrowLeft, FileText, Lock, MessageSquareText, Paperclip, Send } from "lucide-react";
 import { toast } from "sonner";
-import {
-    ArrowLeft,
-    Lock,
-    Send,
-    Paperclip,
-    History,
-    CheckCircle2,
-    ShieldAlert,
-    FileText,
-    UserCheck,
-    PhoneCall,
-    Maximize2,
-    ExternalLink,
-    X,
-} from "lucide-react";
+import { ApiError, fetchJson } from "@/lib/api-client";
+import type { ActivityRow, Attachment, MessageRow, Role, TicketRow, UserRow } from "@/lib/types";
+import { createMessageSchema, PRIORITIES, STATUSES } from "@/lib/validations";
+import { cn, displayName } from "@/lib/utils";
+import { AppShell } from "@/components/app-shell";
+import { SlaTrace } from "@/components/sla";
+import { AttachmentPicker } from "@/components/create-ticket-modal";
+import { Button } from "@/components/ui/button";
+import { Select, Textarea } from "@/components/ui/field";
+import { PriorityBadge, RoleBadge, StatusBadge, TicketId } from "@/components/ui/badges";
+import { Avatar, EmptyState, ErrorState, Panel, Segmented, Skeleton } from "@/components/ui/primitives";
 
-interface Attachment {
-    name: string;
-    url: string;
+interface TicketPayload {
+  ticket: TicketRow;
+  messages: MessageRow[];
+  activityLogs: ActivityRow[];
+  hasMoreMessages: boolean;
+  hasMoreActivity: boolean;
 }
 
-interface TicketDetail {
-    _id: string;
-    ticketNumber: string;
-    title: string;
-    description: string;
-    priority: "Low" | "Medium" | "High" | "Urgent";
-    status: "Open" | "In Progress" | "Waiting on User" | "Resolved" | "Closed";
-    category?: { _id: string; name: string };
-    createdBy: { _id: string; name: string; email: string; facility?: string };
-    assignedAgent?: {
-        _id: string;
-        name: string;
-        email: string;
-        facility?: string;
-    } | null;
-    attachments: Attachment[];
-    responseDueDate: string;
-    resolutionDueDate: string;
-    firstRespondedAt?: string | null;
-    resolvedAt?: string | null;
-    slaBreached: boolean;
-    createdAt: string;
-}
-
-interface MessageItem {
-    _id: string;
-    body: string;
-    isInternal: boolean;
-    attachments: Attachment[];
-    createdAt: string;
-    author: {
-        _id: string;
-        name: string;
-        email: string;
-        role: string;
-        facility?: string;
-    };
-}
-
-interface ActivityItem {
-    _id: string;
-    action: string;
-    details: string;
-    createdAt: string;
-    actor?: { name: string; role: string };
-}
-
-interface AgentOption {
-    _id: string;
-    name: string;
-    email: string;
-}
-
-interface PageProps {
-    params: Promise<{ id: string }>;
-}
-
-function isImageAttachment(url: string, name?: string): boolean {
-    if (!url) return false;
-    const lowerUrl = url.toLowerCase();
-    const lowerName = (name || "").toLowerCase();
-    const imageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".bmp"];
-    if (imageExtensions.some((ext) => lowerUrl.endsWith(ext) || lowerName.endsWith(ext))) {
-        return true;
-    }
-    return lowerUrl.includes("/image/upload/") || lowerUrl.startsWith("data:image/");
-}
-
-function TicketDetailContent({ params }: PageProps) {
-    const unwrappedParams = use(params);
-    const id = unwrappedParams?.id;
-    const { data: session, status: sessionStatus } = useSession();
-    const router = useRouter();
-    const queryClient = useQueryClient();
-
-    const [ticket, setTicket] = useState<TicketDetail | null>(null);
-    const [messages, setMessages] = useState<MessageItem[]>([]);
-    const [activityLogs, setActivityLogs] = useState<ActivityItem[]>([]);
-    const [hasMoreMessages, setHasMoreMessages] = useState(false);
-    const [hasMoreActivity, setHasMoreActivity] = useState(false);
-    const [loadingHistory, setLoadingHistory] = useState<"messages" | "activity" | null>(null);
-    const [selectedPreview, setSelectedPreview] = useState<Attachment | null>(null);
-
-    const [replyBody, setReplyBody] = useState("");
-    const [isInternal, setIsInternal] = useState(false);
-    const [replyAttachments, setReplyAttachments] = useState<Attachment[]>([]);
-    const [uploading, setUploading] = useState(false);
-    const [posting, setPosting] = useState(false);
-    const [updatingMeta, setUpdatingMeta] = useState(false);
-
-    const ticketQuery = useQuery({
-        queryKey: ["ticket", id, session?.user?.id],
-        queryFn: ({ signal }) => fetchJson<{
-            ticket: TicketDetail;
-            messages: MessageItem[];
-            activityLogs: ActivityItem[];
-            hasMoreMessages: boolean;
-            hasMoreActivity: boolean;
-        }>(`/api/tickets/${id}`, { cache: "no-store", signal }),
-        enabled: Boolean(id) && sessionStatus === "authenticated",
-        staleTime: 0,
-    });
-    const agentsQuery = useQuery({
-        queryKey: ["users", "agents", session?.user?.id],
-        queryFn: ({ signal }) => fetchJson<{ users: AgentOption[] }>("/api/users?role=agent", { cache: "no-store", signal }),
-        enabled: sessionStatus === "authenticated" && session?.user?.role === "admin",
-    });
-    const agents = agentsQuery.data?.users ?? [];
-    const loading = ticketQuery.isPending;
-    const error = ticketQuery.error instanceof Error ? ticketQuery.error.message : "";
-
-    useEffect(() => {
-        const result = ticketQuery.data;
-        if (!result) return;
-        setTicket(result.ticket);
-        setMessages(result.messages || []);
-        setActivityLogs(result.activityLogs || []);
-        setHasMoreMessages(Boolean(result.hasMoreMessages));
-        setHasMoreActivity(Boolean(result.hasMoreActivity));
-    }, [ticketQuery.data]);
-
-    useEffect(() => {
-        if (sessionStatus === "unauthenticated") {
-            router.replace("/login");
-        }
-    }, [sessionStatus, router]);
-
-    async function handleUpdateTicket(payload: {
-        status?: string;
-        priority?: string;
-        assignedAgent?: string | null;
-    }) {
-        setUpdatingMeta(true);
-        try {
-            const res = await fetch(`/api/tickets/${id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                toast.error(data.error || "Update failed");
-            } else {
-                toast.success("Ticket updated");
-                if (data.ticket) setTicket(data.ticket);
-                await queryClient.invalidateQueries({ queryKey: ["ticket", id] });
-                await queryClient.invalidateQueries({ queryKey: ["tickets"] });
-                await queryClient.invalidateQueries({ queryKey: ["activity"] });
-                await queryClient.invalidateQueries({ queryKey: ["agent", "overview"] });
-            }
-        } catch {
-            toast.error("Failed to update ticket");
-        } finally {
-            setUpdatingMeta(false);
-        }
-    }
-
-    async function loadOlderHistory(kind: "messages" | "activity") {
-        const cursorItem = kind === "messages" ? messages[0] : activityLogs[activityLogs.length - 1];
-        if (!id || !cursorItem || loadingHistory) return;
-
-        setLoadingHistory(kind);
-        try {
-            const params = new URLSearchParams({
-                history: kind,
-                beforeAt: cursorItem.createdAt,
-                beforeId: cursorItem._id,
-            });
-            const data = await queryClient.fetchQuery({
-                queryKey: ["ticket-history", id, kind, cursorItem.createdAt, cursorItem._id],
-                queryFn: ({ signal }) => fetchJson<{
-                    messages?: MessageItem[];
-                    activityLogs?: ActivityItem[];
-                    hasMoreMessages?: boolean;
-                    hasMoreActivity?: boolean;
-                }>(`/api/tickets/${id}?${params}`, { cache: "no-store", signal }),
-            });
-
-            if (kind === "messages") {
-                setMessages((current) => [...(data.messages || []), ...current]);
-                setHasMoreMessages(Boolean(data.hasMoreMessages));
-            } else {
-                setActivityLogs((current) => [...current, ...(data.activityLogs || [])]);
-                setHasMoreActivity(Boolean(data.hasMoreActivity));
-            }
-        } catch (loadError) {
-            toast.error(loadError instanceof Error ? loadError.message : "Could not load older history");
-        } finally {
-            setLoadingHistory(null);
-        }
-    }
-
-    async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-        const files = e.target.files;
-        if (!files || files.length === 0) return;
-        if (replyAttachments.length + files.length > 3) {
-            toast.error("Maximum 3 attachments per reply");
-            return;
-        }
-
-        setUploading(true);
-        try {
-            for (const file of Array.from(files)) {
-                const formData = new FormData();
-                formData.append("file", file);
-                const res = await fetch("/api/upload", {
-                    method: "POST",
-                    body: formData,
-                });
-                const data = await res.json();
-                if (res.ok && data.attachment) {
-                    setReplyAttachments((prev) => [...prev, data.attachment]);
-                } else {
-                    toast.error(data.error || "Upload failed");
-                }
-            }
-        } finally {
-            setUploading(false);
-            e.target.value = "";
-        }
-    }
-
-    async function handlePostMessage(e: React.FormEvent) {
-        e.preventDefault();
-        if (replyBody.trim().length < 2) {
-            toast.error("Please enter a message before sending");
-            return;
-        }
-
-        setPosting(true);
-        try {
-            const res = await fetch(`/api/tickets/${id}/messages`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    body: replyBody,
-                    isInternal,
-                    attachments: replyAttachments,
-                }),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                toast.error(data.error || "Failed to post reply");
-            } else {
-                toast.success(
-                    isInternal ? "Internal note added (Staff Only)" : "Reply posted"
-                );
-                setReplyBody("");
-                setIsInternal(false);
-                setReplyAttachments([]);
-                if (data.message) setMessages((current) => [...current, data.message]);
-                if (data.activityLog) setActivityLogs((current) => [data.activityLog, ...current]);
-                if (data.ticket) setTicket((current) => current ? { ...current, ...data.ticket } : current);
-                await queryClient.invalidateQueries({ queryKey: ["ticket", id] });
-                await queryClient.invalidateQueries({ queryKey: ["tickets"] });
-                await queryClient.invalidateQueries({ queryKey: ["activity"] });
-                await queryClient.invalidateQueries({ queryKey: ["agent", "overview"] });
-            }
-        } catch {
-            toast.error("Network error while posting message");
-        } finally {
-            setPosting(false);
-        }
-    }
-
-    const role = session?.user?.role;
-
-    return (
-        <DashboardShell
-            title={ticket ? `${ticket.ticketNumber} Details` : "Incident Details"}
-            action={
-                <Link
-                    href={role === "user" ? "/tickets" : "/dashboard"}
-                    className="h-10 px-4 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors border border-white/10"
-                >
-                    <ArrowLeft className="h-4 w-4" />
-                    {role === "user" ? "Back to My Tickets" : "Back to Queue"}
-                </Link>
-            }
+function AttachmentList({ items }: { items: Attachment[] }) {
+  if (!items?.length) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-2">
+      {items.map((a) => (
+        <a
+          key={a.url}
+          href={a.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex h-8 max-w-[240px] items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 text-[12.5px] text-ink-2 hover:border-teal-200 hover:text-teal-700"
         >
-            {loading ? (
-                <TicketDetailSkeleton />
-            ) : error || !ticket ? (
-                <div className="bg-white rounded-2xl border border-rose-200 p-8 text-center space-y-3 shadow-baligo">
-                    <ShieldAlert className="h-8 w-8 text-rose-500 mx-auto" />
-                    <div className="text-base font-bold text-slate-900">
-                        {error || "Ticket Not Found"}
-                    </div>
-                    <p className="text-xs text-slate-500">
-                        You can only view tickets created by you or assigned to your support queue.
-                    </p>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => router.push(role === "user" ? "/tickets" : "/dashboard")}
-                        className="rounded-xl"
-                    >
-                        Return to Tickets
-                    </Button>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full min-w-0">
-                    {/* Left 8 cols: Incident Description & Messages */}
-                    <div className="lg:col-span-8 space-y-6 w-full min-w-0">
-                        {/* Main Incident Card */}
-                        <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
-                            <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="font-mono text-xs font-bold px-3 py-1 rounded-xl bg-[#141738] text-[#00D2B4]">
-                                        {ticket.ticketNumber}
-                                    </span>
-                                    <Badge variant="outline" className="text-xs rounded-lg">
-                                        {ticket.category?.name || "Clinical IT"}
-                                    </Badge>
-                                    <Badge
-                                        variant="outline"
-                                        className={`text-xs font-bold rounded-lg ${
-                                            ticket.priority === "Urgent"
-                                                ? "bg-rose-50 text-rose-700 border-rose-200"
-                                                : "bg-slate-50 text-slate-700"
-                                        }`}
-                                    >
-                                        {ticket.priority} Priority
-                                    </Badge>
-                                    <Badge
-                                        variant="outline"
-                                        className="text-xs rounded-lg font-medium text-[#6052E9] border-purple-200 bg-purple-50"
-                                    >
-                                        {ticket.status}
-                                    </Badge>
-                                </div>
-
-                                {role !== "user" && (
-                                    <SLACountdown
-                                        status={ticket.status}
-                                        responseDueDate={ticket.responseDueDate}
-                                        resolutionDueDate={ticket.resolutionDueDate}
-                                        firstRespondedAt={ticket.firstRespondedAt}
-                                        slaBreached={ticket.slaBreached}
-                                    />
-                                )}
-                            </div>
-
-                            <h1 className="text-xl font-bold text-slate-900 leading-snug">
-                                {ticket.title}
-                            </h1>
-
-                            <div className="text-xs sm:text-sm text-slate-700 whitespace-pre-line leading-relaxed bg-[#F8FAFC] p-4 rounded-xl border border-slate-100">
-                                {ticket.description}
-                            </div>
-
-                            {ticket.attachments && ticket.attachments.length > 0 && (
-                                <div className="space-y-3 pt-3 border-t border-slate-100">
-                                    <div className="flex items-center justify-between">
-                                        <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-500">
-                                            <Paperclip className="h-3.5 w-3.5 text-[#5b4fe9]" />
-                                            <span>Incident Attachments ({ticket.attachments.length}/3)</span>
-                                        </div>
-                                        <span className="text-[11px] text-slate-400">
-                                            Click any image to preview
-                                        </span>
-                                    </div>
-
-                                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                        {ticket.attachments.map((att, i) => {
-                                            const isImg = isImageAttachment(att.url, att.name);
-                                            return (
-                                                <div
-                                                    key={i}
-                                                    onClick={() => setSelectedPreview(att)}
-                                                    className="group relative rounded-2xl border border-slate-200/80 bg-white overflow-hidden shadow-xs hover:shadow-md hover:border-[#5b4fe9]/50 transition-all cursor-pointer flex flex-col"
-                                                >
-                                                    {isImg ? (
-                                                        <div className="relative aspect-video sm:aspect-[4/3] w-full bg-slate-900 overflow-hidden">
-                                                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                            <img
-                                                                src={att.url}
-                                                                alt={att.name}
-                                                                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                                                            />
-                                                            <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                                                <span className="px-2.5 py-1 rounded-lg bg-white/95 text-slate-900 text-xs font-bold flex items-center gap-1 shadow-md">
-                                                                    <Maximize2 className="h-3.5 w-3.5 text-[#5b4fe9]" />
-                                                                    View
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                    ) : (
-                                                        <div className="aspect-video w-full bg-slate-50 flex items-center justify-center text-slate-400">
-                                                            <FileText className="h-8 w-8 text-slate-400" />
-                                                        </div>
-                                                    )}
-                                                    <div className="p-2.5 bg-white flex items-center justify-between gap-2 border-t border-slate-100">
-                                                        <span className="text-xs font-medium text-slate-700 truncate" title={att.name}>
-                                                            {att.name}
-                                                        </span>
-                                                        <a
-                                                            href={att.url}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            onClick={(e) => e.stopPropagation()}
-                                                            title="Open in new tab"
-                                                            className="text-slate-400 hover:text-[#5b4fe9] p-1 rounded-md hover:bg-slate-50 transition"
-                                                        >
-                                                            <ExternalLink className="h-3.5 w-3.5" />
-                                                        </a>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            <div className="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-slate-100 text-xs text-slate-400">
-                                <div className="flex items-center gap-1.5">
-                                    <span>Submitted:</span>
-                                    <strong className="text-slate-600 font-medium">
-                                        {new Date(ticket.createdAt).toLocaleString(undefined, {
-                                            month: "short",
-                                            day: "numeric",
-                                            year: "numeric",
-                                            hour: "2-digit",
-                                            minute: "2-digit",
-                                        })}
-                                    </strong>
-                                </div>
-                                <div className="text-slate-500">
-                                    Facility: <strong className="text-slate-700">{ticket.createdBy?.facility || "Main Medical Center"}</strong>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Communication / Message History */}
-                        <div className="space-y-4">
-                            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
-                                Incident Communication & Diagnostic Updates ({messages.length} loaded)
-                            </h2>
-
-                            {hasMoreMessages && (
-                                <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={loadingHistory !== null}
-                                    onClick={() => loadOlderHistory("messages")}
-                                    className="rounded-lg text-xs"
-                                >
-                                    {loadingHistory === "messages" ? "Loading older replies…" : "Load older replies"}
-                                </Button>
-                            )}
-
-                            {messages.length === 0 ? (
-                                <div className="bg-white rounded-2xl border border-slate-100 p-8 text-center text-xs text-slate-400 shadow-baligo">
-                                    No replies yet. Post the first update below.
-                                </div>
-                            ) : (
-                                messages.map((m) => (
-                                    <div
-                                        key={m._id}
-                                        className={`rounded-2xl border p-5 space-y-2 shadow-baligo ${
-                                            m.isInternal
-                                                ? "bg-amber-50/70 border-amber-200"
-                                                : "bg-white border-slate-100"
-                                        }`}
-                                    >
-                                        <div className="flex items-center justify-between gap-2">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-xs font-bold text-slate-900">
-                                                    {m.author?.name || "Support Staff"}
-                                                </span>
-                                                <Badge
-                                                    variant="outline"
-                                                    className="text-[10px] uppercase font-mono rounded-md"
-                                                >
-                                                    {m.author?.role || "user"}
-                                                </Badge>
-                                                {m.isInternal && (
-                                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-200/80 text-amber-950">
-                                                        <Lock className="h-2.5 w-2.5" />
-                                                        STAFF NOTE
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <span className="text-[11px] font-mono text-slate-400">
-                                                {new Date(m.createdAt).toLocaleString()}
-                                            </span>
-                                        </div>
-
-                                        <p className="text-xs sm:text-sm text-slate-700 whitespace-pre-line leading-relaxed">
-                                            {m.body}
-                                        </p>
-
-                                        {m.attachments && m.attachments.length > 0 && (
-                                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 pt-2">
-                                                {m.attachments.map((att, idx) => {
-                                                    const isImg = isImageAttachment(att.url, att.name);
-                                                    return (
-                                                        <div
-                                                            key={idx}
-                                                            onClick={() => setSelectedPreview(att)}
-                                                            className="group relative rounded-xl border border-slate-200 bg-white overflow-hidden shadow-xs hover:border-[#5b4fe9] transition cursor-pointer"
-                                                        >
-                                                            {isImg ? (
-                                                                <div className="relative aspect-video w-full bg-slate-900 overflow-hidden">
-                                                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                                                    <img
-                                                                        src={att.url}
-                                                                        alt={att.name}
-                                                                        loading="lazy"
-                                                                        decoding="async"
-                                                                        className="w-full h-full object-cover group-hover:scale-105 transition"
-                                                                    />
-                                                                    <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                                                                        <Maximize2 className="h-4 w-4 text-white" />
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                <div className="p-2 flex items-center gap-1.5 text-xs text-slate-600">
-                                                                    <FileText className="h-4 w-4 text-slate-400 shrink-0" />
-                                                                    <span className="truncate">{att.name}</span>
-                                                                </div>
-                                                            )}
-                                                            <div className="p-1.5 bg-slate-50/80 text-[10px] text-slate-600 truncate border-t border-slate-100">
-                                                                {att.name}
-                                                            </div>
-                                                        </div>
-                                                    );
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                ))
-                            )}
-                        </div>
-
-                        {/* Reply Form */}
-                        {ticket.status !== "Closed" ? (
-                            <form
-                                onSubmit={handlePostMessage}
-                                className="bg-white rounded-2xl border border-slate-100 p-4 sm:p-6 shadow-baligo space-y-4"
-                            >
-                                <div className="flex items-center justify-between gap-2 flex-wrap">
-                                    <span className="text-xs font-bold text-slate-800">
-                                        Add Reply or Diagnostic Update
-                                    </span>
-
-                                    {(role === "agent" || role === "admin") && (
-                                        <label className="inline-flex items-center gap-2 text-xs font-medium text-amber-900 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-lg cursor-pointer">
-                                            <input
-                                                type="checkbox"
-                                                checked={isInternal}
-                                                onChange={(e) => setIsInternal(e.target.checked)}
-                                                className="rounded border-amber-300"
-                                            />
-                                            <Lock className="h-3 w-3" />
-                                            Internal Note (Staff Only)
-                                        </label>
-                                    )}
-                                </div>
-
-                                <Textarea
-                                    rows={4}
-                                    placeholder={
-                                        isInternal
-                                            ? "Write an internal technical note visible only to Agents and Admins..."
-                                            : "Write your response to the ticket thread..."
-                                    }
-                                    value={replyBody}
-                                    onChange={(e) => setReplyBody(e.target.value)}
-                                    className={`rounded-xl text-xs ${
-                                        isInternal ? "bg-amber-50/40 border-amber-300" : ""
-                                    }`}
-                                />
-
-                                {replyAttachments.length > 0 && (
-                                    <div className="flex flex-wrap gap-2">
-                                        {replyAttachments.map((att, i) => (
-                                            <span
-                                                key={i}
-                                                className="px-2.5 py-1 rounded-lg bg-slate-100 border text-xs font-mono"
-                                            >
-                                                {att.name}
-                                            </span>
-                                        ))}
-                                    </div>
-                                )}
-
-                                <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
-                                    <label className="cursor-pointer inline-flex items-center gap-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900">
-                                        <Paperclip className="h-3.5 w-3.5" />
-                                        <span>
-                                            {uploading
-                                                ? "Uploading..."
-                                                : `Attach File (${replyAttachments.length}/3)`}
-                                        </span>
-                                        <input
-                                            type="file"
-                                            accept="image/*,.pdf,.txt,.log"
-                                            onChange={handleFileUpload}
-                                            disabled={uploading || replyAttachments.length >= 3}
-                                            className="hidden"
-                                        />
-                                    </label>
-
-                                    <Button
-                                        type="submit"
-                                        size="sm"
-                                        disabled={posting || uploading}
-                                        className={
-                                            isInternal
-                                                ? "bg-amber-600 hover:bg-amber-700 text-white rounded-xl"
-                                                : "bg-[#00D084] hover:bg-[#00BC76] text-white rounded-xl font-bold"
-                                        }
-                                    >
-                                        <Send className="h-3.5 w-3.5 mr-1.5" />
-                                        {posting
-                                            ? "Sending..."
-                                            : isInternal
-                                            ? "Save Note"
-                                            : "Send Reply"}
-                                    </Button>
-                                </div>
-                            </form>
-                        ) : (
-                            <div className="bg-slate-100 rounded-2xl border border-slate-200 p-5 text-center text-xs text-slate-500 font-medium">
-                                This incident ticket is <strong>Closed</strong> and archived.
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Right 4 cols: Controls & Information */}
-                    <div className="lg:col-span-4 space-y-6 w-full min-w-0">
-                        {role === "user" ? (
-                            /* User Friendly Right Sidebar */
-                            <>
-                                {/* Ticket Status Summary Card */}
-                                <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
-                                    <div className="flex items-center justify-between">
-                                        <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                            Ticket Status
-                                        </h3>
-                                        <Badge
-                                            variant="outline"
-                                            className="text-xs rounded-lg font-bold text-[#6052E9] border-purple-200 bg-purple-50"
-                                        >
-                                            {ticket.status}
-                                        </Badge>
-                                    </div>
-
-                                    <p className="text-xs text-slate-500 leading-relaxed bg-[#F8FAFC] p-3 rounded-xl border border-slate-100">
-                                        {ticket.status === "Open" && "Your incident report has been received and queued. A support engineer will review it shortly."}
-                                        {ticket.status === "In Progress" && "A support engineer is actively investigating and working on this incident."}
-                                        {ticket.status === "Waiting on User" && "The engineer has requested additional details. Please reply to the thread to continue."}
-                                        {ticket.status === "Resolved" && "Our engineering team has marked this incident as resolved. Please verify your system."}
-                                        {ticket.status === "Closed" && "This incident has been resolved and archived."}
-                                    </p>
-
-                                    <div className="space-y-3 pt-2 text-xs">
-                                        <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
-                                            <span className="text-slate-400 font-medium">Assigned Support</span>
-                                            {ticket.assignedAgent ? (
-                                                <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                                                    <span>{ticket.assignedAgent.name.split(" (")[0]}</span>
-                                                </div>
-                                            ) : (
-                                                <span className="font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md text-[10px] uppercase">
-                                                    In Triage Queue
-                                                </span>
-                                            )}
-                                        </div>
-
-                                        <div className="flex items-center justify-between py-1.5 border-b border-slate-100">
-                                            <span className="text-slate-400 font-medium">Category</span>
-                                            <span className="font-semibold text-slate-800">
-                                                {ticket.category?.name || "General IT"}
-                                            </span>
-                                        </div>
-
-                                        <div className="flex items-center justify-between py-1.5">
-                                            <span className="text-slate-400 font-medium">Priority Level</span>
-                                            <Badge
-                                                variant="outline"
-                                                className={`text-[11px] rounded-lg px-2 py-0.5 font-bold ${
-                                                    ticket.priority === "Urgent"
-                                                        ? "bg-rose-50 text-rose-700 border-rose-200"
-                                                        : "bg-slate-50 text-slate-700"
-                                                }`}
-                                            >
-                                                {ticket.priority}
-                                            </Badge>
-                                        </div>
-                                    </div>
-
-                                    {ticket.status !== "Closed" && (
-                                        <div className="pt-3 border-t border-slate-100">
-                                            <p className="text-[11px] text-slate-400 mb-2">
-                                                Has your issue been resolved?
-                                            </p>
-                                            <Button
-                                                onClick={() => handleUpdateTicket({ status: "Closed" })}
-                                                disabled={updatingMeta}
-                                                variant="outline"
-                                                className="w-full text-xs rounded-xl border-emerald-300 text-emerald-800 hover:bg-emerald-50 font-bold cursor-pointer"
-                                            >
-                                                <CheckCircle2 className="h-4 w-4 mr-1.5 text-emerald-600" />
-                                                Close Incident Ticket
-                                            </Button>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Clinical IT Emergency Contact Card (Baligo midnight navy) */}
-                                <div className="bg-[#141738] text-white rounded-2xl p-5 sm:p-6 border border-white/5 shadow-baligo space-y-3">
-                                    <div className="flex items-center gap-2 text-rose-400 text-xs font-bold uppercase tracking-wider">
-                                        <PhoneCall className="h-3.5 w-3.5" />
-                                        Hospital IT Operations
-                                    </div>
-                                    <h4 className="text-sm font-bold text-white">
-                                        Critical Patient System Down?
-                                    </h4>
-                                    <p className="text-xs text-slate-300 leading-relaxed">
-                                        For operating room or immediate patient care downtime, dial SOC helpline:
-                                    </p>
-                                    <div className="py-1">
-                                        <div className="text-2xl font-black text-[#00D2B4] font-mono">
-                                            EXT 4040
-                                        </div>
-                                        <div className="text-[10px] text-slate-400">
-                                            24/7 Priority Emergency Dispatch
-                                        </div>
-                                    </div>
-                                </div>
-                            </>
-                        ) : (
-                            /* Agent & Admin Right Sidebar with Controls, SLA, & Audit */
-                            <>
-                                {/* Incident Controls */}
-                                <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-100 shadow-baligo space-y-4 w-full min-w-0 overflow-hidden">
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                                        Incident Controls
-                                    </h3>
-
-                                    <div className="space-y-3">
-                                        <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-slate-700">
-                                                Ticket Status
-                                            </label>
-                                            <Select
-                                                value={ticket.status || undefined}
-                                                disabled={updatingMeta}
-                                                onValueChange={(val) => {
-                                                    if (val) handleUpdateTicket({ status: val });
-                                                }}
-                                            >
-                                                <SelectTrigger className="h-9 text-xs w-full rounded-xl">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="Open">Open</SelectItem>
-                                                    <SelectItem value="In Progress">In Progress</SelectItem>
-                                                    <SelectItem value="Waiting on User">Waiting on User</SelectItem>
-                                                    <SelectItem value="Resolved">Resolved</SelectItem>
-                                                    <SelectItem value="Closed">Closed</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-
-                                        <div className="space-y-1">
-                                            <label className="text-xs font-semibold text-slate-700">
-                                                Priority Level
-                                            </label>
-                                            <Select
-                                                value={ticket.priority || undefined}
-                                                disabled={updatingMeta}
-                                                onValueChange={(val) => {
-                                                    if (val) handleUpdateTicket({ priority: val });
-                                                }}
-                                            >
-                                                <SelectTrigger className="h-9 text-xs w-full rounded-xl">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="Low">Low (24h/72h)</SelectItem>
-                                                    <SelectItem value="Medium">Medium (8h/48h)</SelectItem>
-                                                    <SelectItem value="High">High (4h/24h)</SelectItem>
-                                                    <SelectItem value="Urgent">Urgent (1h/8h)</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </div>
-
-                                    {role === "admin" && (
-                                        <div className="space-y-1 pt-3 border-t border-slate-100">
-                                            <label className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-                                                <UserCheck className="h-3.5 w-3.5 text-[#6052E9]" />
-                                                Assign Engineer
-                                            </label>
-                                            <Select
-                                                value={ticket.assignedAgent?._id || "UNASSIGNED"}
-                                                disabled={updatingMeta}
-                                                onValueChange={(val) =>
-                                                    handleUpdateTicket({
-                                                        assignedAgent: val === "UNASSIGNED" ? null : val,
-                                                    })
-                                                }
-                                            >
-                                                <SelectTrigger className="h-9 text-xs w-full rounded-xl">
-                                                    <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="UNASSIGNED">-- Unassigned --</SelectItem>
-                                                    {agents.map((ag) => (
-                                                        <SelectItem key={ag._id} value={ag._id}>
-                                                            {ag.name}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* SLA Compliance Deadlines */}
-                                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-3 text-xs">
-                                    <h3 className="font-bold uppercase tracking-wider text-slate-400">
-                                        SLA Compliance Deadlines
-                                    </h3>
-
-                                    <div className="space-y-2 font-mono">
-                                        <div className="flex justify-between py-1.5 border-b border-slate-100">
-                                            <span className="text-slate-400">First Response Due:</span>
-                                            <span className="text-slate-900 font-semibold">
-                                                {new Date(ticket.responseDueDate).toLocaleString()}
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between py-1.5 border-b border-slate-100">
-                                            <span className="text-slate-400">First Responded At:</span>
-                                            <span className="text-emerald-600 font-semibold">
-                                                {ticket.firstRespondedAt
-                                                    ? new Date(ticket.firstRespondedAt).toLocaleString()
-                                                    : "Pending Reply"}
-                                            </span>
-                                        </div>
-                                        <div className="flex justify-between py-1.5">
-                                            <span className="text-slate-400">Resolution Due:</span>
-                                            <span className="text-slate-900 font-semibold">
-                                                {new Date(ticket.resolutionDueDate).toLocaleString()}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                {/* Audit Activity Log */}
-                                <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-baligo space-y-4">
-                                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-                                        <History className="h-3.5 w-3.5" />
-                                        Audit Activity Log ({activityLogs.length} loaded)
-                                    </h3>
-
-                                    {hasMoreActivity && (
-                                        <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="outline"
-                                            disabled={loadingHistory !== null}
-                                            onClick={() => loadOlderHistory("activity")}
-                                            className="rounded-lg text-xs"
-                                        >
-                                            {loadingHistory === "activity" ? "Loading older activity…" : "Load older activity"}
-                                        </Button>
-                                    )}
-
-                                    <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                                        {activityLogs.map((log) => (
-                                            <div
-                                                key={log._id}
-                                                className="text-xs border-l-2 border-purple-300 pl-3 py-0.5 space-y-0.5"
-                                            >
-                                                <div className="font-semibold text-slate-800">
-                                                    {log.details}
-                                                </div>
-                                                <div className="text-[11px] font-mono text-slate-400">
-                                                    {log.actor?.name || "System"} •{" "}
-                                                    {new Date(log.createdAt).toLocaleString()}
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </div>
-            )}
-
-            {/* Fullscreen Responsive Image Lightbox Modal */}
-            {selectedPreview && (
-                <div
-                    className="fixed inset-0 z-[9999] bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 transition-all"
-                    onClick={() => setSelectedPreview(null)}
-                >
-                    <div
-                        className="relative bg-[#141738] rounded-2xl border border-white/10 shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden text-white"
-                        onClick={(e) => e.stopPropagation()}
-                    >
-                        {/* Header */}
-                        <div className="flex items-center justify-between p-3.5 sm:p-4 border-b border-white/10 bg-white/5">
-                            <div className="flex items-center gap-2 min-w-0 pr-3">
-                                <FileText className="h-4 w-4 text-[#00D2B4] shrink-0" />
-                                <span className="text-xs sm:text-sm font-bold truncate">
-                                    {selectedPreview.name}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                                <a
-                                    href={selectedPreview.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="h-8 px-2.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition"
-                                >
-                                    <ExternalLink className="h-3.5 w-3.5" />
-                                    <span className="hidden sm:inline">Open Original</span>
-                                </a>
-                                <button
-                                    onClick={() => setSelectedPreview(null)}
-                                    className="h-8 w-8 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
-                                >
-                                    <X className="h-4 w-4" />
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Image Body */}
-                        <div className="flex-1 p-2 sm:p-4 flex items-center justify-center bg-slate-950/50 overflow-auto">
-                            {isImageAttachment(selectedPreview.url, selectedPreview.name) ? (
-                                // eslint-disable-next-line @next/next/no-img-element
-                                <img
-                                    src={selectedPreview.url}
-                                    alt={selectedPreview.name}
-                                    className="max-w-full max-h-[75vh] w-auto h-auto object-contain rounded-lg shadow-lg select-none"
-                                />
-                            ) : (
-                                <div className="p-10 text-center text-slate-400 space-y-3">
-                                    <FileText className="h-14 w-14 mx-auto text-slate-400" />
-                                    <p className="text-sm">This file is not an image.</p>
-                                    <a
-                                        href={selectedPreview.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-[#5b4fe9] text-white text-xs font-bold"
-                                    >
-                                        Download File
-                                    </a>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            )}
-        </DashboardShell>
-    );
+          <FileText className="size-3.5 shrink-0" />
+          <span className="truncate">{a.name}</span>
+        </a>
+      ))}
+    </div>
+  );
 }
 
-export default function TicketDetailPage({ params }: PageProps) {
+function Message({ m }: { m: MessageRow }) {
+  const role = (m.author?.role ?? "user") as Role;
+  return (
+    <li
+      className={cn(
+        "rounded-lg border px-4 py-3.5 sm:px-5",
+        m.isInternal
+          ? "border-warn/30 bg-[repeating-linear-gradient(135deg,var(--color-warn-soft)_0_10px,#fdf7ea_10px_20px)]"
+          : role === "user"
+            ? "border-line bg-surface"
+            : "border-teal-100 bg-teal-50/50",
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <Avatar name={m.author?.name} size={26} />
+        <span className="text-[13.5px] font-semibold text-ink">{displayName(m.author?.name)}</span>
+        <RoleBadge role={role} />
+        {m.isInternal && (
+          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-warn">
+            <Lock className="size-3" /> Internal note · staff only
+          </span>
+        )}
+        <time className="ml-auto text-[12px] text-ink-4" dateTime={m.createdAt} title={format(new Date(m.createdAt), "PPpp")}>
+          {formatDistanceToNowStrict(new Date(m.createdAt), { addSuffix: true })}
+        </time>
+      </div>
+      <p className="mt-2.5 whitespace-pre-wrap break-words text-[14px] leading-relaxed text-ink-2">{m.body}</p>
+      <AttachmentList items={m.attachments} />
+    </li>
+  );
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  TICKET_CREATED: "Created",
+  STATUS_CHANGED: "Status",
+  ASSIGNED: "Assigned",
+  UNASSIGNED: "Unassigned",
+  PRIORITY_CHANGED: "Priority",
+  REPLY_POSTED: "Reply",
+  INTERNAL_NOTE_ADDED: "Note",
+  SLA_BREACHED: "SLA",
+  AUTO_CLOSED: "Auto-close",
+};
+
+function ActivityTimeline({ items }: { items: ActivityRow[] }) {
+  if (items.length === 0) return <p className="py-4 text-center text-[13px] text-ink-3">No entries yet.</p>;
+  return (
+    <ol className="relative space-y-4 border-l border-line pl-5">
+      {items.map((a) => (
+        <li key={a._id} className="relative">
+          <span
+            className={cn(
+              "absolute -left-[25px] top-1 size-2.5 rounded-full ring-4 ring-surface",
+              a.action === "SLA_BREACHED" ? "bg-urgent" : a.action === "STATUS_CHANGED" ? "bg-teal-500" : "bg-line-strong",
+            )}
+            aria-hidden
+          />
+          <p className="text-[13px] leading-snug text-ink-2">
+            <span className="font-medium text-ink">{a.actor ? displayName(a.actor.name) : "System"}</span> — {a.details}
+          </p>
+          <p className="mt-0.5 text-[12px] text-ink-4">
+            {ACTION_LABEL[a.action] ?? a.action} · {format(new Date(a.createdAt), "MMM d, HH:mm")}
+          </p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function Detail({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5">
+      <dt className="text-[13px] text-ink-3">{label}</dt>
+      <dd className="min-w-0 text-right text-[13px] text-ink">{children}</dd>
+    </div>
+  );
+}
+
+export default function TicketDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { data: session } = useSession();
+  const role = session?.user?.role as Role | undefined;
+  const isStaff = role === "agent" || role === "admin";
+  const queryClient = useQueryClient();
+
+  const [body, setBody] = useState("");
+  const [files, setFiles] = useState<Attachment[]>([]);
+  const [internal, setInternal] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [tab, setTab] = useState<"all" | "status">("all");
+  const [older, setOlder] = useState<{ messages: MessageRow[]; activity: ActivityRow[]; moreM?: boolean; moreA?: boolean }>({
+    messages: [],
+    activity: [],
+  });
+
+  const q = useQuery({
+    queryKey: ["ticket", id],
+    queryFn: ({ signal }) => fetchJson<TicketPayload>(`/api/tickets/${id}`, { signal }),
+    retry: (count, err) => !(err instanceof ApiError && err.status < 500) && count < 1,
+  });
+
+  const agents = useQuery({
+    queryKey: ["agents"],
+    queryFn: ({ signal }) => fetchJson<{ users: UserRow[] }>("/api/users?role=agent&active=true&limit=100", { signal }),
+    enabled: role === "admin",
+    staleTime: 5 * 60_000,
+  });
+
+  const t = q.data?.ticket;
+  const messages = [...older.messages, ...(q.data?.messages ?? [])];
+  const activity = [...(q.data?.activityLogs ?? []), ...older.activity];
+  const hasMoreMessages = older.moreM ?? q.data?.hasMoreMessages;
+  const hasMoreActivity = older.moreA ?? q.data?.hasMoreActivity;
+  const closed = t?.status === "Closed";
+
+  async function refresh() {
+    setOlder({ messages: [], activity: [] });
+    await queryClient.invalidateQueries({ queryKey: ["ticket", id] });
+    void queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    void queryClient.invalidateQueries({ queryKey: ["overview"] });
+    void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+  }
+
+  async function update(patch: Record<string, unknown>, success: string) {
+    setUpdating(true);
+    try {
+      await fetchJson(`/api/tickets/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+      toast.success(success);
+      await refresh();
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  async function send(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = createMessageSchema.safeParse({ body, isInternal: isStaff && internal, attachments: files });
+    if (!parsed.success) {
+      toast.error(parsed.error.issues[0]?.message ?? "Check your message");
+      return;
+    }
+    setSending(true);
+    try {
+      await fetchJson(`/api/tickets/${id}/messages`, { method: "POST", body: JSON.stringify(parsed.data) });
+      setBody("");
+      setFiles([]);
+      toast.success(parsed.data.isInternal ? "Internal note added" : "Reply sent");
+      await refresh();
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function loadOlder(kind: "messages" | "activity") {
+    const list = kind === "messages" ? messages : activity;
+    const cursor = kind === "messages" ? list[0] : list[list.length - 1];
+    if (!cursor) return;
+    try {
+      const p = new URLSearchParams({ history: kind, beforeAt: cursor.createdAt, beforeId: cursor._id });
+      const data = await fetchJson<{ messages?: MessageRow[]; activityLogs?: ActivityRow[]; hasMoreMessages?: boolean; hasMoreActivity?: boolean }>(
+        `/api/tickets/${id}?${p}`,
+      );
+      setOlder((o) =>
+        kind === "messages"
+          ? { ...o, messages: [...(data.messages ?? []), ...o.messages], moreM: data.hasMoreMessages }
+          : { ...o, activity: [...o.activity, ...(data.activityLogs ?? [])], moreA: data.hasMoreActivity },
+      );
+    } catch (e) {
+      toast.error((e as Error).message);
+    }
+  }
+
+  const backHref = role === "admin" ? "/admin/tickets" : "/tickets";
+  const back = (
+    <Link href={backHref} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-3 hover:text-ink">
+      <ArrowLeft className="size-3.5" /> {role === "admin" ? "All tickets" : role === "agent" ? "My queue" : "My tickets"}
+    </Link>
+  );
+
+  if (q.isError) {
+    const notFound = q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 403);
     return (
-        <Suspense
-            fallback={
-                <div className="min-h-screen bg-[#F4F6FB] p-4 sm:p-8">
-                    <TicketDetailSkeleton />
-                </div>
-            }
-        >
-            <TicketDetailContent params={params} />
-        </Suspense>
+      <AppShell title={notFound ? "Ticket not found" : "Ticket"} back={back}>
+        <Panel>
+          {notFound ? (
+            <EmptyState
+              title="This ticket doesn’t exist or isn’t shared with you"
+              description="Check the link, or go back to your list."
+            />
+          ) : (
+            <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
+          )}
+        </Panel>
+      </AppShell>
     );
+  }
+
+  if (!t) {
+    return (
+      <AppShell title={<Skeleton className="h-8 w-80 max-w-full" />} back={back}>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="space-y-4">
+            <Skeleton className="h-40" />
+            <Skeleton className="h-28" />
+            <Skeleton className="h-28" />
+          </div>
+          <Skeleton className="h-96" />
+        </div>
+      </AppShell>
+    );
+  }
+
+  const statusLogs = activity.filter((a) => ["STATUS_CHANGED", "TICKET_CREATED", "AUTO_CLOSED"].includes(a.action));
+
+  return (
+    <AppShell
+      back={back}
+      title={t.title}
+      description={
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+          <TicketId value={t.ticketNumber} className="text-[13px]" />
+          <StatusBadge status={t.status} />
+          <PriorityBadge priority={t.priority} />
+          <span className="text-[13px] text-ink-3">
+            Opened {formatDistanceToNowStrict(new Date(t.createdAt), { addSuffix: true })} by {displayName(t.createdBy?.name)}
+          </span>
+        </span>
+      }
+      actions={
+        role === "user" && !closed ? (
+          <Button variant="secondary" loading={updating} onClick={() => update({ status: "Closed" }, "Ticket closed")}>
+            Close ticket
+          </Button>
+        ) : null
+      }
+    >
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+        {/* ---------------- Conversation ---------------- */}
+        <div className="min-w-0 space-y-4">
+          {role === "user" && t.status === "Resolved" && (
+            <div className="flex flex-col gap-3 rounded-lg border border-ok/25 bg-ok-soft px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-[13.5px] text-ink-2">
+                <span className="font-semibold text-ok">Marked as resolved.</span> Is it working? Close the ticket, or reply below to
+                reopen it. It closes on its own after 3 days.
+              </p>
+              <Button size="sm" onClick={() => update({ status: "Closed" }, "Ticket closed")} loading={updating}>
+                Yes, close it
+              </Button>
+            </div>
+          )}
+          {role === "user" && t.status === "Waiting on User" && (
+            <div className="rounded-lg border border-warn/30 bg-warn-soft px-5 py-4 text-[13.5px] text-ink-2">
+              <span className="font-semibold text-warn">Support is waiting for you.</span> Reply below with the details they asked for.
+            </div>
+          )}
+
+          <Panel className="px-5 py-5">
+            <div className="flex items-center gap-2.5">
+              <Avatar name={t.createdBy?.name} size={26} />
+              <span className="text-[13.5px] font-semibold text-ink">{displayName(t.createdBy?.name)}</span>
+              {t.createdBy?.facility && <span className="truncate text-[12.5px] text-ink-3">{t.createdBy.facility}</span>}
+            </div>
+            <p className="mt-3 whitespace-pre-wrap break-words text-[14.5px] leading-relaxed text-ink">{t.description}</p>
+            {!!t.attachments?.length && (
+              <div className="mt-4 border-t border-line pt-3">
+                <p className="flex items-center gap-1.5 text-[12.5px] font-medium text-ink-3">
+                  <Paperclip className="size-3.5" /> {t.attachments.length} attachment{t.attachments.length > 1 ? "s" : ""}
+                </p>
+                <AttachmentList items={t.attachments} />
+              </div>
+            )}
+          </Panel>
+
+          <div className="flex items-center justify-between pt-2">
+            <h2 className="text-[15px] font-semibold text-ink">Conversation</h2>
+            <span className="text-[12.5px] text-ink-3">{messages.length} shown</span>
+          </div>
+
+          {hasMoreMessages && (
+            <Button variant="ghost" size="sm" className="w-full" onClick={() => loadOlder("messages")}>
+              Load earlier messages
+            </Button>
+          )}
+
+          {messages.length === 0 ? (
+            <Panel>
+              <EmptyState
+                icon={MessageSquareText}
+                title="No replies yet"
+                description={isStaff ? "Your first public reply stops the first-response clock." : "Support will reply here. You’ll also get an email."}
+              />
+            </Panel>
+          ) : (
+            <ul className="space-y-3">
+              {messages.map((m) => (
+                <Message key={m._id} m={m} />
+              ))}
+            </ul>
+          )}
+
+          {/* Composer */}
+          {closed ? (
+            <div className="rounded-lg border border-dashed border-line-strong px-5 py-4 text-center text-[13.5px] text-ink-3">
+              This ticket is closed. {role === "user" ? "Raise a new ticket if the problem comes back." : "Change the status to reopen it."}
+            </div>
+          ) : (
+            <form
+              onSubmit={send}
+              className={cn(
+                "rounded-lg border bg-surface p-3 shadow-raise transition-colors sm:p-4",
+                internal ? "border-warn/50 bg-[#fffaf0]" : "border-line",
+              )}
+            >
+              {isStaff && (
+                <div className="mb-3">
+                  <Segmented
+                    value={internal ? "note" : "reply"}
+                    onChange={(v) => setInternal(v === "note")}
+                    options={[
+                      { value: "reply", label: "Reply to requester" },
+                      { value: "note", label: "Internal note" },
+                    ]}
+                  />
+                </div>
+              )}
+              <Textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder={internal ? "Only agents and admins will see this note" : "Write a reply…"}
+                rows={4}
+                maxLength={5000}
+                aria-label="Message"
+                className="border-0 px-1 shadow-none focus:ring-0"
+              />
+              <div className="mt-2 flex flex-col gap-3 border-t border-line pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <AttachmentPicker files={files} onChange={setFiles} disabled={sending} />
+                <Button type="submit" loading={sending} disabled={body.trim().length < 2}>
+                  {!sending && (internal ? <Lock /> : <Send />)}
+                  {internal ? "Add note" : "Send reply"}
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
+
+        {/* ---------------- Sidebar ---------------- */}
+        <aside className="space-y-5">
+          <Panel className="px-5 py-5">
+            <SlaTrace ticket={t} />
+          </Panel>
+
+          <Panel className="px-5 py-3">
+            <dl className="divide-y divide-line">
+              <Detail label="Status">
+                {isStaff ? (
+                  <Select
+                    aria-label="Change status"
+                    value={t.status}
+                    disabled={updating}
+                    onChange={(e) => update({ status: e.target.value }, `Status set to ${e.target.value}`)}
+                    className="w-44 [&_select]:h-8 [&_select]:text-[13px]"
+                  >
+                    {STATUSES.map((s) => (
+                      <option key={s}>{s}</option>
+                    ))}
+                  </Select>
+                ) : (
+                  <StatusBadge status={t.status} />
+                )}
+              </Detail>
+              <Detail label="Priority">
+                {isStaff && !closed ? (
+                  <Select
+                    aria-label="Change priority"
+                    value={t.priority}
+                    disabled={updating}
+                    onChange={(e) => update({ priority: e.target.value }, `Priority set to ${e.target.value}`)}
+                    className="w-44 [&_select]:h-8 [&_select]:text-[13px]"
+                  >
+                    {PRIORITIES.map((p) => (
+                      <option key={p}>{p}</option>
+                    ))}
+                  </Select>
+                ) : (
+                  <PriorityBadge priority={t.priority} />
+                )}
+              </Detail>
+              <Detail label="Assignee">
+                {role === "admin" && !closed ? (
+                  <Select
+                    aria-label="Assign agent"
+                    value={t.assignedAgent?._id ?? ""}
+                    disabled={updating}
+                    onChange={(e) =>
+                      update({ assignedAgent: e.target.value || null }, e.target.value ? "Ticket assigned" : "Ticket unassigned")
+                    }
+                    className="w-44 [&_select]:h-8 [&_select]:text-[13px]"
+                  >
+                    <option value="">Unassigned</option>
+                    {agents.data?.users.map((a) => (
+                      <option key={a._id} value={a._id}>
+                        {displayName(a.name)}
+                      </option>
+                    ))}
+                  </Select>
+                ) : t.assignedAgent ? (
+                  displayName(t.assignedAgent.name)
+                ) : (
+                  <span className="text-ink-4">Not assigned yet</span>
+                )}
+              </Detail>
+              <Detail label="Category">{t.category?.name ?? "—"}</Detail>
+              <Detail label="Requester">
+                <span className="block truncate">{displayName(t.createdBy?.name)}</span>
+              </Detail>
+              <Detail label="Reply due">{format(new Date(t.responseDueDate), "MMM d, HH:mm")}</Detail>
+              <Detail label="Fix due">{format(new Date(t.resolutionDueDate), "MMM d, HH:mm")}</Detail>
+              {t.firstRespondedAt && <Detail label="First reply">{format(new Date(t.firstRespondedAt), "MMM d, HH:mm")}</Detail>}
+              {t.resolvedAt && <Detail label="Resolved">{format(new Date(t.resolvedAt), "MMM d, HH:mm")}</Detail>}
+            </dl>
+          </Panel>
+
+          <Panel className="px-5 py-5">
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h3 className="text-[13px] font-semibold text-ink">History</h3>
+              <Segmented
+                value={tab}
+                onChange={setTab}
+                options={[
+                  { value: "all", label: "Activity" },
+                  { value: "status", label: "Status" },
+                ]}
+              />
+            </div>
+            <ActivityTimeline items={tab === "all" ? activity : statusLogs} />
+            {hasMoreActivity && (
+              <Button variant="ghost" size="sm" className="mt-3 w-full" onClick={() => loadOlder("activity")}>
+                Load older entries
+              </Button>
+            )}
+          </Panel>
+        </aside>
+      </div>
+    </AppShell>
+  );
 }

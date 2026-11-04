@@ -1,668 +1,259 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import { DashboardShell } from "@/components/dashboard-shell";
-import { fetchJson } from "@/lib/api-client";
-import { TableSkeleton } from "@/components/ui/skeleton";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import { Search, UserPlus, Users } from "lucide-react";
 import { toast } from "sonner";
-import {
-    UserPlus,
-    Search,
-    Shield,
-    Wrench,
-    Stethoscope,
-    RefreshCw,
-    AlertCircle,
-    CheckCircle,
-    XCircle,
-} from "lucide-react";
+import { fetchJson, type Pagination as PaginationMeta } from "@/lib/api-client";
+import type { Role, UserRow } from "@/lib/types";
+import { createStaffSchema } from "@/lib/validations";
+import { cn, displayName } from "@/lib/utils";
+import { AppShell } from "@/components/app-shell";
+import { Button } from "@/components/ui/button";
+import { Field, Input, Select } from "@/components/ui/field";
+import { RoleBadge } from "@/components/ui/badges";
+import { Avatar, EmptyState, ErrorState, Modal, Pagination, Panel, RowsSkeleton, Segmented } from "@/components/ui/primitives";
 
-interface TeamMember {
-    _id: string;
-    name: string;
-    email: string;
-    role: "admin" | "agent" | "user";
-    facility?: string;
-    isActive: boolean;
-    createdAt?: string;
+type RoleFilter = "ALL" | Role;
+
+function AddMemberModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const blank = { name: "", email: "", password: "", role: "agent" as Role, facility: "" };
+  const [form, setForm] = useState(blank);
+  const [errors, setErrors] = useState<Record<string, string | undefined>>({});
+  const [saving, setSaving] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = createStaffSchema.safeParse(form);
+    if (!parsed.success) {
+      const fe = parsed.error.flatten().fieldErrors;
+      setErrors(Object.fromEntries(Object.entries(fe).map(([k, v]) => [k, v?.[0]])));
+      return;
+    }
+    setErrors({});
+    setSaving(true);
+    try {
+      await fetchJson("/api/users", { method: "POST", body: JSON.stringify(parsed.data) });
+      toast.success(`${parsed.data.name} added`);
+      setForm(blank);
+      onClose();
+      void queryClient.invalidateQueries({ queryKey: ["users"] });
+      void queryClient.invalidateQueries({ queryKey: ["agents"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    } catch (err) {
+      toast.error((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title="Add team member"
+      description="Create an account for an agent, admin or requester. Share the password with them securely."
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="add-member" loading={saving}>
+            Add member
+          </Button>
+        </>
+      }
+    >
+      <form id="add-member" onSubmit={submit} className="space-y-4" noValidate>
+        <Field label="Role">
+          <Segmented
+            value={form.role}
+            onChange={(role) => setForm({ ...form, role })}
+            options={[
+              { value: "agent", label: "Agent" },
+              { value: "admin", label: "Admin" },
+              { value: "user", label: "Requester" },
+            ]}
+          />
+        </Field>
+        <Field label="Full name" htmlFor="m-name" error={errors.name}>
+          <Input id="m-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} aria-invalid={!!errors.name} />
+        </Field>
+        <Field label="Email" htmlFor="m-email" error={errors.email}>
+          <Input
+            id="m-email"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            aria-invalid={!!errors.email}
+          />
+        </Field>
+        <Field label="Team or facility" htmlFor="m-fac" error={errors.facility} hint="Optional">
+          <Input id="m-fac" value={form.facility} onChange={(e) => setForm({ ...form, facility: e.target.value })} />
+        </Field>
+        <Field label="Temporary password" htmlFor="m-pass" error={errors.password} hint="8+ characters, one uppercase letter, one number.">
+          <Input
+            id="m-pass"
+            type="text"
+            autoComplete="off"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            aria-invalid={!!errors.password}
+          />
+        </Field>
+      </form>
+    </Modal>
+  );
 }
 
-interface AgentWorkloadItem {
-    agentId: string;
-    agentName: string;
-    active: number;
-    resolved: number;
-    breached: number;
-    total: number;
-}
+export default function TeamPage() {
+  const { data: session } = useSession();
+  const queryClient = useQueryClient();
+  const [role, setRole] = useState<RoleFilter>("ALL");
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [page, setPage] = useState(1);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
 
-export default function AdminTeamPage() {
-    const { data: session, status: sessionStatus } = useSession();
-    const router = useRouter();
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setDebounced(search.trim());
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [search]);
 
-    const queryClient = useQueryClient();
-    const [search, setSearch] = useState("");
-    const [roleFilter, setRoleFilter] = useState("ALL");
+  const params = new URLSearchParams({ page: String(page), limit: "10" });
+  if (role !== "ALL") params.set("role", role);
+  if (debounced) params.set("search", debounced);
 
-    // Modal state for Create Agent
-    const [createOpen, setCreateOpen] = useState(false);
-    const [createForm, setCreateForm] = useState({
-        name: "",
-        email: "",
-        password: "",
-        role: "agent",
-        facility: "Main Medical Center",
-    });
-    const [creating, setCreating] = useState(false);
-    const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const q = useQuery({
+    queryKey: ["users", params.toString()],
+    queryFn: ({ signal }) => fetchJson<{ users: UserRow[]; pagination: PaginationMeta }>(`/api/users?${params}`, { signal }),
+    placeholderData: keepPreviousData,
+  });
 
-    useEffect(() => {
-        if (sessionStatus === "unauthenticated") {
-            router.replace("/login");
-        }
-        if (sessionStatus === "authenticated" && session?.user?.role !== "admin") {
-            router.replace("/dashboard");
-        }
-    }, [sessionStatus, session?.user?.role, router]);
-
-    const teamQuery = useQuery({
-        queryKey: ["admin", "team", session?.user?.id],
-        queryFn: ({ signal }) => fetchJson<{ users: TeamMember[] }>("/api/users?role=ALL", { signal }),
-        enabled: sessionStatus === "authenticated" && session?.user?.role === "admin",
-    });
-    const analyticsQuery = useQuery({
-        queryKey: ["admin", "analytics", session?.user?.id],
-        queryFn: ({ signal }) => fetchJson<{ agentWorkload?: AgentWorkloadItem[] }>("/api/admin/analytics", { signal }),
-        enabled: sessionStatus === "authenticated" && session?.user?.role === "admin",
-    });
-    const members = teamQuery.data?.users ?? [];
-    const workloads = Object.fromEntries((analyticsQuery.data?.agentWorkload ?? []).map((item) => [item.agentId, item])) as Record<string, AgentWorkloadItem>;
-    const loading = teamQuery.isPending;
-    const error = teamQuery.error instanceof Error ? teamQuery.error.message : "";
-    const fetchTeam = async () => {
-        await Promise.all([teamQuery.refetch(), analyticsQuery.refetch()]);
-    };
-
-    async function handleCreateAgent(e: React.FormEvent) {
-        e.preventDefault();
-        setCreating(true);
-        try {
-            const res = await fetch("/api/users", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(createForm),
-            });
-            const data = await res.json();
-            if (!res.ok) {
-                toast.error(data.error || "Failed to create staff member");
-            } else {
-                toast.success(`${createForm.role.toUpperCase()} account created successfully!`);
-                setCreateOpen(false);
-                setCreateForm({
-                    name: "",
-                    email: "",
-                    password: "",
-                    role: "agent",
-                    facility: "Main Medical Center",
-                });
-                await queryClient.invalidateQueries({ queryKey: ["admin", "team"] });
-                await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
-            }
-        } catch {
-            toast.error("Network error while creating account");
-        } finally {
-            setCreating(false);
-        }
+  async function patch(user: UserRow, change: { role?: Role; isActive?: boolean }) {
+    setBusy(user._id);
+    try {
+      const res = await fetchJson<{ unassignedTickets: number }>("/api/users", {
+        method: "PATCH",
+        body: JSON.stringify({ userId: user._id, ...change }),
+      });
+      const name = displayName(user.name);
+      toast.success(
+        change.isActive === false
+          ? `${name} deactivated`
+          : change.isActive
+            ? `${name} reactivated`
+            : `${name} is now ${change.role === "user" ? "a requester" : `an ${change.role}`}`,
+        res.unassignedTickets ? { description: `${res.unassignedTickets} open ticket(s) moved back to unassigned.` } : undefined,
+      );
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      void queryClient.invalidateQueries({ queryKey: ["agents"] });
+      void queryClient.invalidateQueries({ queryKey: ["analytics"] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setBusy(null);
     }
+  }
 
-    async function handleToggleStatus(userId: string, currentStatus: boolean) {
-        setUpdatingId(userId);
-        try {
-            const res = await fetch("/api/users", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, isActive: !currentStatus }),
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Failed to update user status");
+  const rows = q.data?.users ?? [];
 
-            toast.success(`User ${!currentStatus ? "activated" : "deactivated"} successfully!`);
-            await queryClient.invalidateQueries({ queryKey: ["admin", "team"] });
-            await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : "Update failed";
-            toast.error(msg);
-        } finally {
-            setUpdatingId(null);
-        }
-    }
+  return (
+    <AppShell
+      title="Team"
+      description="Manage who can use the desk and what they can do. Deactivated people can’t sign in."
+      actions={
+        <Button onClick={() => setAdding(true)}>
+          <UserPlus /> Add member
+        </Button>
+      }
+    >
+      <Panel>
+        <div className="flex flex-col gap-3 border-b border-line px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+          <Segmented
+            value={role}
+            onChange={(v) => {
+              setRole(v);
+              setPage(1);
+            }}
+            options={[
+              { value: "ALL", label: "Everyone" },
+              { value: "agent", label: "Agents" },
+              { value: "admin", label: "Admins" },
+              { value: "user", label: "Requesters" },
+            ]}
+          />
+          <div className="relative sm:w-72">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-ink-4" />
+            <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or email" className="pl-9" aria-label="Search people" />
+          </div>
+        </div>
 
-    async function handleChangeRole(userId: string, newRole: string) {
-        setUpdatingId(userId);
-        try {
-            const res = await fetch("/api/users", {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ userId, role: newRole }),
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || "Failed to update role");
-
-            toast.success("Role updated successfully!");
-            await queryClient.invalidateQueries({ queryKey: ["admin", "team"] });
-            await queryClient.invalidateQueries({ queryKey: ["admin", "analytics"] });
-        } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : "Role change failed";
-            toast.error(msg);
-        } finally {
-            setUpdatingId(null);
-        }
-    }
-
-    const filteredMembers = members.filter((m) => {
-        if (roleFilter !== "ALL" && m.role !== roleFilter) return false;
-        if (search.trim()) {
-            const query = search.toLowerCase();
-            return (
-                m.name.toLowerCase().includes(query) ||
-                m.email.toLowerCase().includes(query) ||
-                (m.facility && m.facility.toLowerCase().includes(query))
-            );
-        }
-        return true;
-    });
-
-    const totalStaff = members.length;
-    const totalAgents = members.filter((m) => m.role === "agent").length;
-    const totalAdmins = members.filter((m) => m.role === "admin").length;
-    const totalClients = members.filter((m) => m.role === "user").length;
-
-    const roleBadge = (role: string) => {
-        switch (role) {
-            case "admin":
-                return (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
-                        <Shield className="h-3 w-3" />
-                        Admin
-                    </span>
-                );
-            case "agent":
-                return (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-sky-50 text-sky-700 border border-sky-200">
-                        <Wrench className="h-3 w-3" />
-                        Support Engineer
-                    </span>
-                );
-            default:
-                return (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-slate-50 text-slate-700 border border-slate-200">
-                        <Stethoscope className="h-3 w-3" />
-                        Clinic Client
-                    </span>
-                );
-        }
-    };
-
-    return (
-        <DashboardShell
-            title="Hospital Support Team & Engineers"
-
-            action={
-                <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
-                    <button
-                        onClick={fetchTeam}
-                        title="Refresh roster"
-                        className="h-9 sm:h-10 px-3 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-medium flex items-center gap-1.5 transition-colors border border-white/10 cursor-pointer"
+        {q.isPending ? (
+          <RowsSkeleton />
+        ) : q.isError ? (
+          <ErrorState message={q.error.message} onRetry={() => q.refetch()} />
+        ) : rows.length === 0 ? (
+          <EmptyState icon={Users} title="No one matches" description="Try another name or role filter." />
+        ) : (
+          <ul className={cn("divide-y divide-line", q.isFetching && "opacity-60")}>
+            {rows.map((u) => {
+              const self = u._id === session?.user?.id;
+              return (
+                <li key={u._id} className="flex flex-col gap-3 px-5 py-3.5 md:flex-row md:items-center">
+                  <div className="flex min-w-0 flex-1 items-center gap-3">
+                    <Avatar name={u.name} size={34} className={cn(!u.isActive && "opacity-40")} />
+                    <div className="min-w-0">
+                      <p className={cn("flex items-center gap-2 text-[14px] font-medium", u.isActive ? "text-ink" : "text-ink-4 line-through")}>
+                        <span className="truncate">{displayName(u.name)}</span>
+                        <RoleBadge role={u.role} />
+                        {self && <span className="text-[12px] font-normal text-ink-4">You</span>}
+                      </p>
+                      <p className="truncate text-[13px] text-ink-3">
+                        {u.email}
+                        {u.facility ? ` · ${u.facility}` : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <span className="hidden text-[12.5px] text-ink-4 lg:block">Joined {format(new Date(u.createdAt), "MMM d, yyyy")}</span>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      aria-label={`Role for ${u.name}`}
+                      value={u.role}
+                      disabled={self || busy === u._id}
+                      onChange={(e) => patch(u, { role: e.target.value as Role })}
+                      className="w-36 [&_select]:h-8 [&_select]:text-[13px]"
                     >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Refresh</span>
-                    </button>
-
-                    <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-                        <DialogTrigger className="h-9 sm:h-10 px-3.5 sm:px-4 rounded-xl bg-[#00D084] hover:bg-[#00BC76] text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-md cursor-pointer">
-                            <UserPlus className="h-4 w-4" />
-                            <span>Create Agent / Staff</span>
-                        </DialogTrigger>
-                        <DialogContent className="sm:max-w-md">
-                            <DialogHeader>
-                                <DialogTitle className="text-lg font-bold text-slate-900">
-                                    Add New Staff Member
-                                </DialogTitle>
-                            </DialogHeader>
-                            <form onSubmit={handleCreateAgent} className="space-y-4 mt-2">
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold text-slate-700">Full Name</Label>
-                                    <Input
-                                        required
-                                        placeholder="Dr. Jordan Hayes"
-                                        value={createForm.name}
-                                        onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })}
-                                        className="rounded-xl text-xs"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold text-slate-700">Email Address</Label>
-                                    <Input
-                                        required
-                                        type="email"
-                                        placeholder="jordan.hayes@medops.org"
-                                        value={createForm.email}
-                                        onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
-                                        className="rounded-xl text-xs"
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold text-slate-700">Temporary Password</Label>
-                                    <Input
-                                        required
-                                        type="text"
-                                        placeholder="Initial secure password"
-                                        value={createForm.password}
-                                        onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
-                                        className="rounded-xl text-xs"
-                                    />
-                                </div>
-                                <div className="grid grid-cols-2 gap-3">
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs font-semibold text-slate-700">Role</Label>
-                                        <Select
-                                            value={createForm.role}
-                                            onValueChange={(val) => setCreateForm({ ...createForm, role: val ?? "agent" })}
-                                        >
-                                            <SelectTrigger className="rounded-xl text-xs"><SelectValue /></SelectTrigger>
-                                            <SelectContent className="z-[9999]">
-                                                <SelectItem value="agent">Support Engineer</SelectItem>
-                                                <SelectItem value="admin">System Admin</SelectItem>
-                                                <SelectItem value="user">Clinic User</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                    <div className="space-y-1.5">
-                                        <Label className="text-xs font-semibold text-slate-700">Facility</Label>
-                                        <Input
-                                            placeholder="Hospital Center"
-                                            value={createForm.facility}
-                                            onChange={(e) => setCreateForm({ ...createForm, facility: e.target.value })}
-                                            className="rounded-xl text-xs"
-                                        />
-                                    </div>
-                                </div>
-                                <Button
-                                    type="submit"
-                                    disabled={creating}
-                                    className="w-full bg-[#5b4fe9] hover:bg-[#4a3ecc] text-white rounded-xl h-10 font-bold text-xs"
-                                >
-                                    {creating ? "Creating Staff Member..." : "Create Account"}
-                                </Button>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
-                </div>
-            }
-        >
-            <div className="space-y-5 w-full min-w-0 max-w-full overflow-x-hidden">
-                {/* 4 Summary Cards */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 w-full min-w-0">
-                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col justify-between">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Total Team
-                        </span>
-                        <div className="text-2xl sm:text-3xl font-extrabold text-slate-900 mt-2">
-                            {totalStaff}
-                        </div>
-                        <span className="text-[11px] text-slate-400 mt-1 font-medium">All accounts</span>
-                    </div>
-
-                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col justify-between">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Support Engineers
-                        </span>
-                        <div className="text-2xl sm:text-3xl font-extrabold text-[#5b4fe9] mt-2">
-                            {totalAgents}
-                        </div>
-                        <span className="text-[11px] text-slate-400 mt-1 font-medium">Active dispatch staff</span>
-                    </div>
-
-                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col justify-between">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Admins
-                        </span>
-                        <div className="text-2xl sm:text-3xl font-extrabold text-purple-700 mt-2">
-                            {totalAdmins}
-                        </div>
-                        <span className="text-[11px] text-slate-400 mt-1 font-medium">SOC command</span>
-                    </div>
-
-                    <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col justify-between">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                            Clinic Clients
-                        </span>
-                        <div className="text-2xl sm:text-3xl font-extrabold text-[#00d084] mt-2">
-                            {totalClients}
-                        </div>
-                        <span className="text-[11px] text-slate-400 mt-1 font-medium">Requesters</span>
-                    </div>
-                </div>
-
-                {/* Filter & Search Band */}
-                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-100 shadow-baligo flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 w-full min-w-0">
-                    <div className="relative flex-1 min-w-0">
-                        <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                        <Input
-                            placeholder="Search staff by name, email or facility..."
-                            value={search}
-                            onChange={(e) => setSearch(e.target.value)}
-                            className="pl-10 h-10 rounded-xl bg-slate-50/70 border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:bg-white w-full"
-                        />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                        <Select value={roleFilter} onValueChange={(val) => setRoleFilter(val ?? "ALL")}>
-                            <SelectTrigger className="h-10 rounded-xl bg-slate-50/70 border-slate-200 text-xs w-full sm:w-44">
-                                <SelectValue placeholder="Role Filter" />
-                            </SelectTrigger>
-                            <SelectContent className="z-[9999]">
-                                <SelectItem value="ALL">All Roles ({members.length})</SelectItem>
-                                <SelectItem value="agent">Support Engineers ({totalAgents})</SelectItem>
-                                <SelectItem value="admin">System Admins ({totalAdmins})</SelectItem>
-                                <SelectItem value="user">Clinic Requesters ({totalClients})</SelectItem>
-                            </SelectContent>
-                        </Select>
-                    </div>
-                </div>
-
-                {/* Error Banner */}
-                {error && (
-                    <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-2">
-                            <AlertCircle className="h-4 w-4 shrink-0" />
-                            <span>{error}</span>
-                        </div>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={fetchTeam}
-                            className="h-7 text-xs border-rose-300 hover:bg-rose-100 cursor-pointer"
-                        >
-                            Try Again
-                        </Button>
-                    </div>
-                )}
-
-                {/* Team Roster Container (Desktop Table + Mobile Cards) */}
-                <div className="bg-white rounded-2xl border border-slate-100 shadow-baligo overflow-hidden w-full min-w-0">
-                    {loading ? (
-                        <div className="p-6">
-                            <TableSkeleton rows={6} />
-                        </div>
-                    ) : filteredMembers.length === 0 ? (
-                        <div className="py-12 px-4 text-center text-slate-400">
-                            No team members match your filter.
-                        </div>
-                    ) : (
-                        <>
-                            {/* 1. DESKTOP & TABLET VIEW (md and above) */}
-                            <div className="hidden md:block overflow-x-auto w-full">
-                                <table className="w-full text-left border-collapse">
-                                    <thead className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                                        <tr>
-                                            <th className="py-3 px-4">Member Name</th>
-                                            <th className="py-3 px-4">Role</th>
-                                            <th className="py-3 px-4">Facility / Clinic</th>
-                                            <th className="py-3 px-4">Assigned Workload</th>
-                                            <th className="py-3 px-4 text-center">Status</th>
-                                            <th className="py-3 px-4 text-right">Actions</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-slate-100 text-xs">
-                                        {filteredMembers.map((m) => {
-                                            const workload = workloads[m._id];
-                                            const isSelf = m._id === session?.user?.id;
-
-                                            return (
-                                                <tr key={m._id} className="hover:bg-slate-50/60 transition-colors">
-                                                    {/* Member & Email */}
-                                                    <td className="py-3.5 px-4">
-                                                        <div className="flex items-center gap-2.5">
-                                                            <div className="w-8 h-8 rounded-full bg-[#5b4fe9]/10 text-[#5b4fe9] font-bold flex items-center justify-center text-xs shrink-0 border border-[#5b4fe9]/20">
-                                                                {m.name.charAt(0).toUpperCase()}
-                                                            </div>
-                                                            <div className="min-w-0">
-                                                                <div className="font-bold text-slate-900 truncate flex items-center gap-1.5">
-                                                                    <span>{m.name}</span>
-                                                                    {isSelf && (
-                                                                        <span className="text-[10px] font-bold text-[#5b4fe9]">
-                                                                            (You)
-                                                                        </span>
-                                                                    )}
-                                                                </div>
-                                                                <div className="text-[11px] text-slate-400 truncate">
-                                                                    {m.email}
-                                                                </div>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-
-                                                    {/* Role */}
-                                                    <td className="py-3.5 px-4 whitespace-nowrap">
-                                                        {roleBadge(m.role)}
-                                                    </td>
-
-                                                    {/* Facility */}
-                                                    <td className="py-3.5 px-4 text-slate-600 font-medium">
-                                                        {m.facility || "Main Medical Center"}
-                                                    </td>
-
-                                                    {/* Workload Stats */}
-                                                    <td className="py-3.5 px-4 whitespace-nowrap">
-                                                        {m.role === "agent" && workload ? (
-                                                            <div className="flex items-center gap-1.5 text-[11px]">
-                                                                <span className="font-bold text-[#5b4fe9] bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
-                                                                    {workload.active} active
-                                                                </span>
-                                                                <span className="text-slate-400">
-                                                                    {workload.resolved} resolved
-                                                                </span>
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-[11px] text-slate-400">
-                                                                {m.role === "admin" ? "Command Staff" : "Client Requester"}
-                                                            </span>
-                                                        )}
-                                                    </td>
-
-                                                    {/* Active / Inactive Status */}
-                                                    <td className="py-3.5 px-4 text-center whitespace-nowrap">
-                                                        <button
-                                                            onClick={() => handleToggleStatus(m._id, m.isActive)}
-                                                            disabled={updatingId === m._id || isSelf}
-                                                            title={isSelf ? "Cannot deactivate yourself" : "Toggle active status"}
-                                                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold transition-all ${
-                                                                isSelf ? "cursor-not-allowed opacity-80" : "cursor-pointer hover:opacity-85"
-                                                            } ${
-                                                                m.isActive
-                                                                    ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                    : "bg-slate-100 text-slate-500 border border-slate-200"
-                                                            }`}
-                                                        >
-                                                            {m.isActive ? (
-                                                                <>
-                                                                    <CheckCircle className="h-3 w-3 text-emerald-600" />
-                                                                    <span>Active</span>
-                                                                </>
-                                                            ) : (
-                                                                <>
-                                                                    <XCircle className="h-3 w-3 text-slate-400" />
-                                                                    <span>Inactive</span>
-                                                                </>
-                                                            )}
-                                                        </button>
-                                                    </td>
-
-                                                    {/* Role Adjust Dropdown */}
-                                                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                                                        {isSelf ? (
-                                                            <span className="text-[11px] text-slate-400 font-mono font-bold">Owner</span>
-                                                        ) : (
-                                                            <Select
-                                                                value={m.role}
-                                                                onValueChange={(val) => handleChangeRole(m._id, val ?? "agent")}
-                                                                disabled={updatingId === m._id}
-                                                            >
-                                                                <SelectTrigger className="h-8 rounded-lg text-xs bg-slate-50 border-slate-200 w-28 ml-auto">
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent className="z-[9999]">
-                                                                    <SelectItem value="agent">Agent</SelectItem>
-                                                                    <SelectItem value="admin">Admin</SelectItem>
-                                                                    <SelectItem value="user">User</SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            );
-                                        })}
-                                    </tbody>
-                                </table>
-                            </div>
-
-                            {/* 2. MOBILE CARD VIEW (< md, phones and small screens) */}
-                            <div className="md:hidden divide-y divide-slate-100">
-                                {filteredMembers.map((m) => {
-                                    const workload = workloads[m._id];
-                                    const isSelf = m._id === session?.user?.id;
-
-                                    return (
-                                        <div key={m._id} className="p-4 space-y-3 hover:bg-slate-50/50 transition-colors">
-                                            {/* Header: Avatar, Name, Email, Role */}
-                                            <div className="flex items-start justify-between gap-2">
-                                                <div className="flex items-center gap-2.5 min-w-0">
-                                                    <div className="w-10 h-10 rounded-full bg-[#5b4fe9]/10 text-[#5b4fe9] font-extrabold flex items-center justify-center text-sm shrink-0 border border-[#5b4fe9]/20">
-                                                        {m.name.charAt(0).toUpperCase()}
-                                                    </div>
-                                                    <div className="min-w-0">
-                                                        <div className="font-bold text-slate-900 text-sm truncate flex items-center gap-1.5">
-                                                            <span>{m.name}</span>
-                                                            {isSelf && (
-                                                                <span className="text-[10px] font-bold text-[#5b4fe9]">
-                                                                    (You)
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        <div className="text-xs text-slate-400 truncate">
-                                                            {m.email}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                {roleBadge(m.role)}
-                                            </div>
-
-                                            {/* Details: Facility & Workload */}
-                                            <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50/80 p-2.5 rounded-xl border border-slate-100">
-                                                <div>
-                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                                                        Facility
-                                                    </span>
-                                                    <span className="font-semibold text-slate-700 truncate block mt-0.5">
-                                                        {m.facility || "Main Medical Center"}
-                                                    </span>
-                                                </div>
-                                                <div>
-                                                    <span className="text-[10px] uppercase font-bold text-slate-400 block tracking-wider">
-                                                        Workload
-                                                    </span>
-                                                    {m.role === "agent" && workload ? (
-                                                        <span className="font-bold text-[#5b4fe9] block mt-0.5 truncate">
-                                                            {workload.active} active · {workload.resolved} res
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-slate-500 font-medium block mt-0.5 truncate">
-                                                            {m.role === "admin" ? "Command Staff" : "Client Requester"}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {/* Controls: Status Toggle & Change Role */}
-                                            <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50">
-                                                <div className="flex items-center gap-1.5">
-                                                    <span className="text-xs text-slate-400 font-medium">Status:</span>
-                                                    <button
-                                                        onClick={() => handleToggleStatus(m._id, m.isActive)}
-                                                        disabled={updatingId === m._id || isSelf}
-                                                        title={isSelf ? "Cannot deactivate yourself" : "Toggle active status"}
-                                                        className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold transition-all ${
-                                                            isSelf ? "cursor-not-allowed opacity-80" : "cursor-pointer hover:opacity-85"
-                                                        } ${
-                                                            m.isActive
-                                                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                                                : "bg-slate-100 text-slate-500 border border-slate-200"
-                                                        }`}
-                                                    >
-                                                        {m.isActive ? (
-                                                            <>
-                                                                <CheckCircle className="h-3.5 w-3.5 text-emerald-600" />
-                                                                <span>Active</span>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <XCircle className="h-3.5 w-3.5 text-slate-400" />
-                                                                <span>Inactive</span>
-                                                            </>
-                                                        )}
-                                                    </button>
-                                                </div>
-
-                                                <div className="flex items-center gap-1.5">
-                                                    {isSelf ? (
-                                                        <span className="text-xs text-slate-400 font-mono font-bold">Owner</span>
-                                                    ) : (
-                                                        <Select
-                                                            value={m.role}
-                                                            onValueChange={(val) => handleChangeRole(m._id, val ?? "agent")}
-                                                            disabled={updatingId === m._id}
-                                                        >
-                                                            <SelectTrigger className="h-8 rounded-lg text-xs bg-white border-slate-200 w-28">
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent className="z-[9999]">
-                                                                <SelectItem value="agent">Agent</SelectItem>
-                                                                <SelectItem value="admin">Admin</SelectItem>
-                                                                <SelectItem value="user">User</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </>
-                    )}
-                </div>
-            </div>
-        </DashboardShell>
-    );
+                      <option value="user">Requester</option>
+                      <option value="agent">Agent</option>
+                      <option value="admin">Admin</option>
+                    </Select>
+                    <Button
+                      size="sm"
+                      variant={u.isActive ? "danger" : "secondary"}
+                      disabled={self}
+                      loading={busy === u._id}
+                      onClick={() => patch(u, { isActive: !u.isActive })}
+                      className="w-28"
+                    >
+                      {u.isActive ? "Deactivate" : "Reactivate"}
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <Pagination meta={q.data?.pagination} onPage={setPage} noun="people" />
+      </Panel>
+      <AddMemberModal open={adding} onClose={() => setAdding(false)} />
+    </AppShell>
+  );
 }

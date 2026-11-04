@@ -4,215 +4,167 @@ import { requireAuth } from "@/lib/auth";
 import { Ticket } from "@/models/Ticket";
 import { Category } from "@/models/Category";
 import { User } from "@/models/User";
-import { Message } from "@/models/Message";
+import { maybeSyncLifecycle } from "@/lib/ticket-lifecycle";
+import { PRIORITIES, STATUSES } from "@/lib/validations";
+import { jsonError } from "@/lib/http";
 
-const STATUS_CONFIG = [
-    { status: "Open", color: "#6052E9", badgeClass: "bg-indigo-50 text-indigo-700 border-indigo-200" },
-    { status: "In Progress", color: "#38BDF8", badgeClass: "bg-sky-50 text-sky-700 border-sky-200" },
-    { status: "Waiting on User", color: "#F59E0B", badgeClass: "bg-amber-50 text-amber-700 border-amber-200" },
-    { status: "Resolved", color: "#00D084", badgeClass: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    { status: "Closed", color: "#94A3B8", badgeClass: "bg-slate-50 text-slate-700 border-slate-200" },
-];
+export const dynamic = "force-dynamic";
+
+const TREND_DAYS = 14;
+const ACTIVE = ["Open", "In Progress", "Waiting on User"];
+
+type Row = { _id: unknown; count: number };
 
 export async function GET() {
-    const { errorResponse } = await requireAuth(["admin"]);
-    if (errorResponse) return errorResponse;
+  const { user, errorResponse } = await requireAuth(["admin"]);
+  if (!user) return errorResponse;
 
-    try {
-        await connectDB();
-        const now = new Date();
-        const sevenDaysAgo = new Date(now);
-        sevenDaysAgo.setUTCHours(0, 0, 0, 0);
-        sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
+  try {
+    await connectDB();
+    await maybeSyncLifecycle();
 
-        const [ticketMetrics, categories, agents, messageDaily, unassignedTickets] = await Promise.all([
-            Ticket.aggregate([
-                {
-                    $facet: {
-                        summary: [
-                            {
-                                $group: {
-                                    _id: null,
-                                    totalTickets: { $sum: 1 },
-                                    openTickets: { $sum: { $cond: [{ $eq: ["$status", "Open"] }, 1, 0] } },
-                                    inProgressTickets: {
-                                        $sum: {
-                                            $cond: [{ $in: ["$status", ["In Progress", "Waiting on User"]] }, 1, 0],
-                                        },
-                                    },
-                                    resolvedClosedTickets: {
-                                        $sum: { $cond: [{ $in: ["$status", ["Resolved", "Closed"]] }, 1, 0] },
-                                    },
-                                    slaBreachCount: { $sum: { $cond: ["$slaBreached", 1, 0] } },
-                                    unassignedCount: {
-                                        $sum: { $cond: [{ $eq: [{ $ifNull: ["$assignedAgent", null] }, null] }, 1, 0] },
-                                    },
-                                    firstResponseMilliseconds: {
-                                        $avg: {
-                                            $cond: [
-                                                { $ne: [{ $ifNull: ["$firstRespondedAt", null] }, null] },
-                                                { $subtract: ["$firstRespondedAt", "$createdAt"] },
-                                                null,
-                                            ],
-                                        },
-                                    },
-                                },
-                            },
-                        ],
-                        statusCounts: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
-                        categoryCounts: [
-                            { $group: { _id: "$category", count: { $sum: 1 } } },
-                        ],
-                        agentWorkload: [
-                            { $match: { assignedAgent: { $ne: null } } },
-                            {
-                                $group: {
-                                    _id: "$assignedAgent",
-                                    total: { $sum: 1 },
-                                    active: {
-                                        $sum: {
-                                            $cond: [{ $in: ["$status", ["Resolved", "Closed"]] }, 0, 1],
-                                        },
-                                    },
-                                    resolved: {
-                                        $sum: {
-                                            $cond: [{ $in: ["$status", ["Resolved", "Closed"]] }, 1, 0],
-                                        },
-                                    },
-                                    breached: { $sum: { $cond: ["$slaBreached", 1, 0] } },
-                                },
-                            },
-                        ],
-                        dailyIncoming: [
-                            { $match: { createdAt: { $gte: sevenDaysAgo } } },
-                            {
-                                $group: {
-                                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "UTC" } },
-                                    count: { $sum: 1 },
-                                },
-                            },
-                        ],
-                        dailyResolved: [
-                            { $match: { resolvedAt: { $gte: sevenDaysAgo } } },
-                            {
-                                $group: {
-                                    _id: { $dateToString: { format: "%Y-%m-%d", date: "$resolvedAt", timezone: "UTC" } },
-                                    count: { $sum: 1 },
-                                },
-                            },
-                        ],
-                    },
+    const start = new Date();
+    start.setUTCHours(0, 0, 0, 0);
+    start.setUTCDate(start.getUTCDate() - (TREND_DAYS - 1));
+
+    const [facet] = await Ticket.aggregate([
+      {
+        $facet: {
+          summary: [
+            {
+              $group: {
+                _id: null,
+                total: { $sum: 1 },
+                active: { $sum: { $cond: [{ $in: ["$status", ACTIVE] }, 1, 0] } },
+                unassigned: {
+                  $sum: {
+                    $cond: [{ $and: [{ $in: ["$status", ACTIVE] }, { $eq: [{ $ifNull: ["$assignedAgent", null] }, null] }] }, 1, 0],
+                  },
                 },
-            ]),
-            Category.find().select("name").lean(),
-            User.find({ role: "agent", isActive: true }).select("name email facility").sort({ name: 1 }).lean(),
-            Message.aggregate([
-                { $match: { createdAt: { $gte: sevenDaysAgo } } },
-                {
-                    $group: {
-                        _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "UTC" } },
-                        count: { $sum: 1 },
-                    },
+                breached: { $sum: { $cond: ["$slaBreached", 1, 0] } },
+                activeBreached: { $sum: { $cond: [{ $and: ["$slaBreached", { $in: ["$status", ACTIVE] }] }, 1, 0] } },
+                avgFirstResponseMs: {
+                  $avg: {
+                    $cond: [
+                      { $ne: [{ $ifNull: ["$firstRespondedAt", null] }, null] },
+                      { $subtract: ["$firstRespondedAt", "$createdAt"] },
+                      null,
+                    ],
+                  },
                 },
-            ]),
-            Ticket.find({ assignedAgent: null, status: { $nin: ["Resolved", "Closed"] } })
-                .select("ticketNumber title status priority category createdBy assignedAgent createdAt firstRespondedAt resolvedAt slaBreached")
-                .populate("category", "name")
-                .populate("createdBy", "name email facility")
-                .sort({ createdAt: -1 })
-                .limit(10)
-                .lean(),
-        ]);
-
-        const metrics = ticketMetrics[0] || {};
-        const summaryRow = metrics.summary?.[0] || {};
-        const totalTickets = summaryRow.totalTickets || 0;
-        const slaBreachCount = summaryRow.slaBreachCount || 0;
-        const statusCountMap = new Map<string, number>(
-            (metrics.statusCounts || []).map((entry: { _id: string; count: number }) => [entry._id, entry.count])
-        );
-        const ticketsByStatus = STATUS_CONFIG.map((config) => {
-            const count = statusCountMap.get(config.status) || 0;
-            return {
-                ...config,
-                count,
-                percentage: totalTickets > 0 ? Math.round((count / totalTickets) * 100) : 0,
-            };
-        });
-
-        const categoryCountMap = new Map<string, number>(
-            (metrics.categoryCounts || []).map((entry: { _id: { toString(): string } | null; count: number }) => [
-                entry._id?.toString() || "",
-                entry.count,
-            ])
-        );
-        const ticketsByCategory = categories
-            .map((category) => ({
-                category: category.name,
-                count: categoryCountMap.get(category._id.toString()) || 0,
-            }))
-            .sort((a, b) => b.count - a.count);
-
-        const workloadMap = new Map<string, { active: number; resolved: number; breached: number; total: number }>(
-            (metrics.agentWorkload || []).map((entry: {
-                _id: { toString(): string };
-                active: number;
-                resolved: number;
-                breached: number;
-                total: number;
-            }) => [entry._id.toString(), entry])
-        );
-        const agentWorkload = agents.map((agent) => {
-            const workload = workloadMap.get(agent._id.toString());
-            return {
-                agentId: agent._id.toString(),
-                agentName: agent.name.split(" (")[0],
-                facility: agent.facility || "Support HQ",
-                active: workload?.active || 0,
-                resolved: workload?.resolved || 0,
-                breached: workload?.breached || 0,
-                total: workload?.total || 0,
-            };
-        });
-
-        const incomingByDay = new Map<string, number>((metrics.dailyIncoming || []).map((entry: { _id: string; count: number }) => [entry._id, entry.count]));
-        const resolvedByDay = new Map<string, number>((metrics.dailyResolved || []).map((entry: { _id: string; count: number }) => [entry._id, entry.count]));
-        const messagesByDay = new Map<string, number>(messageDaily.map((entry: { _id: string; count: number }) => [entry._id, entry.count]));
-        const conversationFlow = Array.from({ length: 7 }, (_, index) => {
-            const date = new Date(sevenDaysAgo);
-            date.setUTCDate(date.getUTCDate() + index);
-            const key = date.toISOString().slice(0, 10);
-            return {
-                day: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }),
-                date: date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
-                incoming: incomingByDay.get(key) || 0,
-                conversations: messagesByDay.get(key) || 0,
-                resolved: resolvedByDay.get(key) || 0,
-            };
-        });
-
-        return NextResponse.json({
-            summary: {
-                totalTickets,
-                openTickets: summaryRow.openTickets || 0,
-                inProgressTickets: summaryRow.inProgressTickets || 0,
-                resolvedClosedTickets: summaryRow.resolvedClosedTickets || 0,
-                slaBreachCount,
-                slaComplianceRate: totalTickets > 0 ? Math.round(((totalTickets - slaBreachCount) / totalTickets) * 100) : 100,
-                avgFirstResponseMinutes: summaryRow.firstResponseMilliseconds
-                    ? Math.max(1, Math.round(summaryRow.firstResponseMilliseconds / 60000))
-                    : 0,
-                unassignedCount: summaryRow.unassignedCount || 0,
+                avgResolutionMs: {
+                  $avg: {
+                    $cond: [
+                      { $ne: [{ $ifNull: ["$resolvedAt", null] }, null] },
+                      { $subtract: ["$resolvedAt", "$createdAt"] },
+                      null,
+                    ],
+                  },
+                },
+              },
             },
-            ticketsByStatus,
-            conversationFlow,
-            ticketsByCategory,
-            agentWorkload,
-            unassignedTickets,
-            agents,
-        });
-    } catch (error) {
-        console.error("GET /api/admin/analytics error:", error);
-        return NextResponse.json({ error: "Failed to load analytics" }, { status: 500 });
-    }
+          ],
+          byStatus: [{ $group: { _id: "$status", count: { $sum: 1 } } }],
+          byPriority: [{ $match: { status: { $in: ACTIVE } } }, { $group: { _id: "$priority", count: { $sum: 1 } } }],
+          byCategory: [{ $group: { _id: "$category", count: { $sum: 1 } } }],
+          workload: [
+            { $match: { assignedAgent: { $ne: null } } },
+            {
+              $group: {
+                _id: "$assignedAgent",
+                total: { $sum: 1 },
+                active: { $sum: { $cond: [{ $in: ["$status", ACTIVE] }, 1, 0] } },
+                resolved: { $sum: { $cond: [{ $in: ["$status", ["Resolved", "Closed"]] }, 1, 0] } },
+                breached: { $sum: { $cond: ["$slaBreached", 1, 0] } },
+              },
+            },
+          ],
+          created: [
+            { $match: { createdAt: { $gte: start } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt" } }, count: { $sum: 1 } } },
+          ],
+          resolved: [
+            { $match: { resolvedAt: { $gte: start } } },
+            { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$resolvedAt" } }, count: { $sum: 1 } } },
+          ],
+        },
+      },
+    ]);
+
+    const [categories, agents, unassignedTickets] = await Promise.all([
+      Category.find().select("name").lean(),
+      User.find({ role: "agent", isActive: true }).select("name email facility").sort({ name: 1 }).lean(),
+      Ticket.find({ assignedAgent: null, status: { $in: ACTIVE } })
+        .select("ticketNumber title status priority category createdBy createdAt responseDueDate resolutionDueDate firstRespondedAt slaBreached")
+        .populate("category", "name")
+        .populate("createdBy", "name")
+        .sort({ createdAt: 1 })
+        .limit(6)
+        .lean(),
+    ]);
+
+    const s = facet.summary[0] || {};
+    const map = (rows: Row[]) => new Map(rows.map((r) => [String(r._id), r.count]));
+    const statusMap = map(facet.byStatus);
+    const priorityMap = map(facet.byPriority);
+    const categoryMap = map(facet.byCategory);
+    const createdMap = map(facet.created);
+    const resolvedMap = map(facet.resolved);
+    const workloadMap = new Map<string, { total: number; active: number; resolved: number; breached: number }>(
+      facet.workload.map((w: { _id: unknown; total: number; active: number; resolved: number; breached: number }) => [String(w._id), w]),
+    );
+
+    const trend = Array.from({ length: TREND_DAYS }, (_, i) => {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i);
+      const key = d.toISOString().slice(0, 10);
+      return {
+        date: key,
+        label: d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }),
+        created: createdMap.get(key) || 0,
+        resolved: resolvedMap.get(key) || 0,
+      };
+    });
+
+    const total = s.total || 0;
+    const breached = s.breached || 0;
+
+    return NextResponse.json({
+      summary: {
+        totalTickets: total,
+        activeTickets: s.active || 0,
+        unassignedCount: s.unassigned || 0,
+        slaBreachCount: breached,
+        activeBreachCount: s.activeBreached || 0,
+        slaComplianceRate: total ? Math.round(((total - breached) / total) * 100) : 100,
+        avgFirstResponseMinutes: s.avgFirstResponseMs ? Math.round(s.avgFirstResponseMs / 60000) : null,
+        avgResolutionHours: s.avgResolutionMs ? Math.round((s.avgResolutionMs / 3_600_000) * 10) / 10 : null,
+        resolvedInPeriod: trend.reduce((a, d) => a + d.resolved, 0),
+        createdInPeriod: trend.reduce((a, d) => a + d.created, 0),
+      },
+      ticketsByStatus: STATUSES.map((status) => ({ status, count: statusMap.get(status) || 0 })),
+      ticketsByPriority: PRIORITIES.map((priority) => ({ priority, count: priorityMap.get(priority) || 0 })),
+      ticketsByCategory: categories
+        .map((c) => ({ category: c.name, count: categoryMap.get(c._id.toString()) || 0 }))
+        .sort((a, b) => b.count - a.count),
+      trend,
+      agentWorkload: agents.map((a) => {
+        const w = workloadMap.get(a._id.toString());
+        return {
+          agentId: a._id.toString(),
+          name: a.name,
+          email: a.email,
+          active: w?.active || 0,
+          resolved: w?.resolved || 0,
+          breached: w?.breached || 0,
+          total: w?.total || 0,
+        };
+      }),
+      unassignedTickets,
+      agents: agents.map((a) => ({ _id: a._id.toString(), name: a.name, email: a.email })),
+    });
+  } catch (error) {
+    console.error("GET /api/admin/analytics error:", error);
+    return jsonError("Failed to load analytics", 500);
+  }
 }
