@@ -117,7 +117,7 @@ export function SlaCell({ ticket, now }: { ticket: SlaTicket; now: number }) {
     <div className="min-w-[120px]">
       <div className={cn("num flex items-center gap-1.5 text-[13px] font-medium", t.text)}>
         {sla.breached && <span className="size-1.5 animate-pulse-dot rounded-full bg-urgent" aria-hidden />}
-        {sla.breached && r.state !== "missed" ? `Breached · ${describe(r)}` : describe(r)}
+        {sla.breached && r.state !== "missed" ? `Breached — ${describe(r)}` : describe(r)}
       </div>
       <div className="mt-1 h-1 w-full max-w-[140px] overflow-hidden rounded-full bg-sunken" aria-hidden>
         <div className={cn("h-full rounded-full", t.bar)} style={{ width: `${Math.min(100, r.used * 100)}%` }} />

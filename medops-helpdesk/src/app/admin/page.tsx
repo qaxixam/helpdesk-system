@@ -115,7 +115,7 @@ export default function AdminOverviewPage() {
               {
                 label: "SLA breaches",
                 value: s?.slaBreachCount ?? 0,
-                context: `${s?.activeBreachCount ?? 0} still open · ${s?.slaComplianceRate ?? 100}% compliant`,
+                context: `${s?.activeBreachCount ?? 0} still open — ${s?.slaComplianceRate ?? 100}% compliant`,
                 tone: s?.activeBreachCount ? "alert" : "default",
               },
               {
@@ -236,7 +236,7 @@ export default function AdminOverviewPage() {
                       <span className="flex items-center gap-2">
                         <TicketId value={t.ticketNumber} />
                         <span className="text-[12px] text-ink-4">
-                          {displayName(t.createdBy?.name)} · {formatDistanceToNowStrict(new Date(t.createdAt), { addSuffix: true })}
+                          {displayName(t.createdBy?.name)} — {formatDistanceToNowStrict(new Date(t.createdAt), { addSuffix: true })}
                         </span>
                       </span>
                       <span className="mt-0.5 block truncate font-medium text-ink group-hover:text-teal-700">{t.title}</span>

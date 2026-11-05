@@ -73,9 +73,7 @@ function TicketRows({ rows, role, now }: { rows: TicketRow[]; role: Role; now: n
               <div className="mt-2.5 flex items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-2">
                   <StatusBadge status={t.status} />
-                  <span className="text-ink-4" aria-hidden>
-                    ·
-                  </span>
+                  <span className="h-3 w-px shrink-0 bg-line-strong" aria-hidden />
                   <span className="truncate text-[12.5px] text-ink-3">{person}</span>
                 </span>
                 <SlaInline ticket={t} now={now} className="shrink-0" />

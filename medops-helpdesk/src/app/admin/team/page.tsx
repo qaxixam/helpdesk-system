@@ -218,7 +218,7 @@ export default function TeamPage() {
                       </p>
                       <p className="truncate text-[13px] text-ink-3">
                         {u.email}
-                        {u.facility ? ` · ${u.facility}` : ""}
+                        {u.facility ? ` — ${u.facility}` : ""}
                       </p>
                     </div>
                   </div>

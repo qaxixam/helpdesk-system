@@ -12,7 +12,7 @@ import type { Pagination as PaginationMeta } from "@/lib/api-client";
 
 export function Panel({ className, children, ...props }: React.HTMLAttributes<HTMLElement>) {
   return (
-    <section className={cn("rounded-lg border border-line bg-surface shadow-raise", className)} {...props}>
+    <section className={cn("glass rounded-xl", className)} {...props}>
       {children}
     </section>
   );
@@ -209,7 +209,7 @@ export function Modal({
         aria-modal="true"
         aria-label={title}
         className={cn(
-          "relative flex max-h-[92dvh] w-full flex-col rounded-t-xl bg-surface shadow-pop sm:rounded-xl",
+          "glass-strong relative flex max-h-[92dvh] w-full flex-col rounded-t-2xl sm:rounded-2xl",
           size === "lg" ? "sm:max-w-2xl" : "sm:max-w-lg",
         )}
       >

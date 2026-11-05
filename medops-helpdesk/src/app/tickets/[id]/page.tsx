@@ -68,7 +68,7 @@ function Message({ m, currentUserId }: { m: MessageRow; currentUserId?: string }
         <RoleBadge role={role} label={isMe ? "Me" : undefined} />
         {m.isInternal && (
           <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-warn">
-            <Lock className="size-3" /> Internal note · staff only
+            <Lock className="size-3" /> Internal note, staff only
           </span>
         )}
         <time className="ml-auto shrink-0 text-[11.5px] text-ink-4 sm:text-[12px]" dateTime={m.createdAt} title={format(new Date(m.createdAt), "PPpp")}>
@@ -110,7 +110,7 @@ function ActivityTimeline({ items }: { items: ActivityRow[] }) {
             <span className="font-medium text-ink">{a.actor ? displayName(a.actor.name) : "System"}</span> — {a.details}
           </p>
           <p className="mt-0.5 text-[12px] text-ink-4">
-            {ACTION_LABEL[a.action] ?? a.action} · {format(new Date(a.createdAt), "MMM d, HH:mm")}
+            {ACTION_LABEL[a.action] ?? a.action} — {format(new Date(a.createdAt), "MMM d, HH:mm")}
           </p>
         </li>
       ))}

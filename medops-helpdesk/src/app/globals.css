@@ -1,13 +1,12 @@
 @import "tailwindcss";
 
 /*
- * MedOps "Ward" design system
+ * MedOps "Glass Ward" design system (v2 — Glassmorphism + Bento)
  * ---------------------------------------------------------------
- * Subject: a hospital IT helpdesk. The vernacular is the ward —
- * triage colours, monitor read-outs, chart paper. Surfaces are cool
- * clinical whites, ink is a deep scrubs green, the action colour is
- * surgical teal. Triage colours are reserved for priority & SLA only,
- * so red/amber always mean "time matters".
+ * Same subject, new material: panels are frosted glass floating on
+ * a soft cyan/teal backdrop, KPI/summary blocks are asymmetric bento
+ * grids instead of plain strips. Triage colours are still reserved
+ * for priority & SLA only — red/amber always mean "time matters".
  */
 
 @theme {
@@ -16,7 +15,7 @@
   --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, monospace;
 
   /* Neutrals — cool, faintly green */
-  --color-canvas: #f4f6f4;
+  --color-canvas: #eef9f7;
   --color-surface: #ffffff;
   --color-sunken: #eef1ef;
   --color-line: #dfe5e2;
@@ -34,6 +33,13 @@
   --color-teal-600: #0e6e66;
   --color-teal-700: #0b5752;
   --color-teal-900: #0a2f2d;
+
+  /* Glass surfaces — translucent white over the backdrop */
+  --color-glass: rgb(255 255 255 / 0.58);
+  --color-glass-strong: rgb(255 255 255 / 0.78);
+  --color-glass-border: rgb(255 255 255 / 0.65);
+  --color-glass-border-strong: rgb(255 255 255 / 0.9);
+  --blur-glass: 20px;
 
   /* Sidebar */
   --color-ward: #0f1f1e;
@@ -57,13 +63,14 @@
   --color-warn: #b7791f;
   --color-warn-soft: #fbf3e2;
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
 
   --shadow-pop: 0 12px 32px -8px rgb(15 31 30 / 0.18), 0 2px 6px -2px rgb(15 31 30 / 0.08);
   --shadow-raise: 0 1px 2px rgb(15 31 30 / 0.05);
+  --shadow-glass: 0 1px 1px rgb(255 255 255 / 0.6) inset, 0 8px 28px -10px rgb(15 60 56 / 0.18), 0 2px 8px -2px rgb(15 60 56 / 0.08);
 
   --animate-sweep: sweep 1.6s ease-in-out infinite;
   --animate-pulse-dot: pulse-dot 1.8s ease-in-out infinite;
@@ -85,14 +92,20 @@
   }
   html {
     -webkit-text-size-adjust: 100%;
+    overflow-x: clip;
   }
   body {
-    background: var(--color-canvas);
+    background-color: var(--color-canvas);
+    background-image:
+      radial-gradient(1100px 650px at 8% -10%, rgb(22 137 126 / 0.16), transparent 60%),
+      radial-gradient(900px 600px at 100% 0%, rgb(94 234 212 / 0.16), transparent 55%),
+      radial-gradient(1000px 700px at 50% 110%, rgb(89 196 180 / 0.12), transparent 60%);
+    background-attachment: fixed;
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-feature-settings: "ss01", "cv11";
     -webkit-font-smoothing: antialiased;
-    overflow-x: hidden;
+    overflow-x: clip;
   }
   ::selection {
     background: var(--color-teal-200);
@@ -135,4 +148,20 @@
 .scroll-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;
+}
+
+/* Glassmorphism surface: frosted panel floating on the backdrop gradient */
+.glass {
+  background-color: var(--color-glass);
+  backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  border: 1px solid var(--color-glass-border);
+  box-shadow: var(--shadow-glass);
+}
+.glass-strong {
+  background-color: var(--color-glass-strong);
+  backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  border: 1px solid var(--color-glass-border-strong);
+  box-shadow: var(--shadow-glass);
 }
